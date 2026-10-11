@@ -18,20 +18,20 @@ func HTTPMiddleware(authenticator *Authenticator, logger *slog.Logger) func(http
 
 			authHeader := r.Header.Get("Authorization")
 			if authHeader == "" {
-				http.Error(w, `{"error":"missing authorization header"}`, http.StatusUnauthorized)
+				unauthorized(w, `{"error":"missing authorization header"}`, "")
 				return
 			}
 
 			token := strings.TrimPrefix(authHeader, "Bearer ")
 			if token == authHeader {
-				http.Error(w, `{"error":"invalid authorization format"}`, http.StatusUnauthorized)
+				unauthorized(w, `{"error":"invalid authorization format"}`, "")
 				return
 			}
 
 			identity, err := authenticator.Authenticate(token)
 			if err != nil {
 				logger.Warn("authentication failed", "err", err, "remote", r.RemoteAddr)
-				http.Error(w, `{"error":"authentication failed"}`, http.StatusUnauthorized)
+				unauthorized(w, `{"error":"authentication failed"}`, "invalid_token")
 				return
 			}
 
@@ -39,4 +39,14 @@ func HTTPMiddleware(authenticator *Authenticator, logger *slog.Logger) func(http
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
+}
+
+// unauthorized writes a 401 with a WWW-Authenticate challenge (RFC 6750).
+func unauthorized(w http.ResponseWriter, body, errCode string) {
+	challenge := `Bearer realm="git-mcp"`
+	if errCode != "" {
+		challenge += `, error="` + errCode + `"`
+	}
+	w.Header().Set("WWW-Authenticate", challenge)
+	http.Error(w, body, http.StatusUnauthorized)
 }

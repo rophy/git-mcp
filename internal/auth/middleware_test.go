@@ -24,7 +24,7 @@ func TestHTTPMiddleware(t *testing.T) {
 	kid := "test-key-1"
 	jwksServer := setupJWKSServer(t, key, kid)
 
-	authenticator, err := auth.NewAuthenticator(newCfg(jwksServer.URL, map[string]config.ServiceConfig{
+	authenticator, err := auth.NewAuthenticator(t.Context(), newCfg(jwksServer.URL, map[string]config.ServiceConfig{
 		"diagnostics-agent": {Issuer: "test-issuer", Subject: "agent-sub", Repos: []string{"github.com/org/*"}},
 	}))
 	require.NoError(t, err)
@@ -50,12 +50,13 @@ func TestHTTPMiddleware(t *testing.T) {
 		header      string
 		wantStatus  int
 		wantService string
+		wantAuthHdr string
 	}{
-		{"health bypass", "/health", "", http.StatusOK, ""},
-		{"missing header", "/mcp", "", http.StatusUnauthorized, ""},
-		{"non-bearer scheme", "/mcp", "Basic xxx", http.StatusUnauthorized, ""},
-		{"invalid token", "/mcp", "Bearer invalid-token", http.StatusUnauthorized, ""},
-		{"valid token", "/mcp", "Bearer " + validToken, http.StatusOK, "diagnostics-agent"},
+		{"health bypass", "/health", "", http.StatusOK, "", ""},
+		{"missing header", "/mcp", "", http.StatusUnauthorized, "", `Bearer realm="git-mcp"`},
+		{"non-bearer scheme", "/mcp", "Basic xxx", http.StatusUnauthorized, "", `Bearer realm="git-mcp"`},
+		{"invalid token", "/mcp", "Bearer invalid-token", http.StatusUnauthorized, "", `Bearer realm="git-mcp", error="invalid_token"`},
+		{"valid token", "/mcp", "Bearer " + validToken, http.StatusOK, "diagnostics-agent", ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -68,6 +69,7 @@ func TestHTTPMiddleware(t *testing.T) {
 			h.ServeHTTP(rec, req)
 			assert.Equal(t, tt.wantStatus, rec.Code)
 			assert.Equal(t, tt.wantService, gotService)
+			assert.Equal(t, tt.wantAuthHdr, rec.Header().Get("WWW-Authenticate"))
 		})
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	gojwt "github.com/golang-jwt/jwt/v5"
@@ -17,10 +18,27 @@ type Identity struct {
 	Subject string
 }
 
+// kidRefetchInterval limits how often an unknown kid can force a JWKS fetch.
+const kidRefetchInterval = time.Minute
+
 type issuerEntry struct {
 	name    string
 	iss     string
 	jwksURI string
+
+	mu          sync.Mutex
+	lastRefetch time.Time
+}
+
+// allowRefetch reports whether an unknown kid may force a JWKS fetch now.
+func (e *issuerEntry) allowRefetch() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if time.Since(e.lastRefetch) < kidRefetchInterval {
+		return false
+	}
+	e.lastRefetch = time.Now()
+	return true
 }
 
 type Authenticator struct {
@@ -30,8 +48,9 @@ type Authenticator struct {
 	cache    *jwk.Cache
 }
 
-func NewAuthenticator(cfg *config.Config) (*Authenticator, error) {
-	cache := jwk.NewCache(context.Background())
+// NewAuthenticator creates an Authenticator. The JWKS cache stops refreshing when ctx is done.
+func NewAuthenticator(ctx context.Context, cfg *config.Config) (*Authenticator, error) {
+	cache := jwk.NewCache(ctx)
 	issuers := make(map[string]*issuerEntry, len(cfg.Auth.Issuers))
 
 	for _, ic := range cfg.Auth.Issuers {
@@ -84,6 +103,12 @@ func (a *Authenticator) Authenticate(tokenString string) (*Identity, error) {
 			return nil, fmt.Errorf("missing kid header")
 		}
 		key, found := keySet.LookupKeyID(kid)
+		if !found && issEntry.allowRefetch() {
+			// The issuer may have rotated its keys.
+			if refreshed, err := a.cache.Refresh(ctx, issEntry.jwksURI); err == nil {
+				key, found = refreshed.LookupKeyID(kid)
+			}
+		}
 		if !found {
 			return nil, fmt.Errorf("key %s not found in JWKS", kid)
 		}

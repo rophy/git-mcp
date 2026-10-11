@@ -57,10 +57,13 @@ func main() {
 		return fmt.Sprintf("https://%s", repo), upstream.Token, nil
 	}
 
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	cacheMgr := cache.NewManager(cfg.Server.CacheDir, executor, upstreamResolver)
 	var authenticator *auth.Authenticator
 	if !useStdio && len(cfg.Auth.Issuers) > 0 {
-		authenticator, err = auth.NewAuthenticator(cfg)
+		authenticator, err = auth.NewAuthenticator(ctx, cfg)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error initializing auth: %v\n", err)
 			os.Exit(1)
@@ -68,9 +71,6 @@ func main() {
 	}
 
 	srv := server.New(cfg, cacheMgr, executor, authenticator, logger)
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 
 	if useStdio {
 		logger.Info("starting in stdio mode")

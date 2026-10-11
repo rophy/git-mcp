@@ -90,6 +90,8 @@ func RunHTTP(ctx context.Context, srv *mcp.Server, listen string, authenticator 
 	var h http.Handler = mux
 	if authenticator != nil {
 		h = auth.HTTPMiddleware(authenticator, logger)(h)
+	} else {
+		logger.Warn("authentication disabled: no auth issuers configured, all clients can access all repos")
 	}
 	h = audit.Middleware(h)
 
