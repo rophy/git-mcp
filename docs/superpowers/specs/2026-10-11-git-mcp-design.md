@@ -177,6 +177,15 @@ Applied to all tools:
 - **Environment sanitization:** no credential leaks via `GIT_*` environment variables.
 - **Timeouts:** per-command timeout (default 30s) to prevent hanging operations.
 - **Output limits:** all tools cap output size to prevent memory exhaustion.
+- **Process cleanup:** on timeout, the whole git process group is killed, including helpers such as `git-remote-http`.
+
+### Accepted Risks
+
+Reviewed on 2026-10-11. No code change; revisit if the assumptions change.
+
+- **Git config and hooks from upstream.** A clone does not copy the upstream's config or hooks. A test upstream with `core.fsmonitor`, a `diff.<driver>.textconv` command and a matching `.gitattributes` ran no command during `clone`, `show`, `log -p`, `grep` or `fetch`. `.gitattributes` can name a driver, but the command must come from config, and global/system config is disabled (`GIT_CONFIG_GLOBAL=/dev/null`, `GIT_CONFIG_NOSYSTEM=1`). **Assumption:** only git-mcp can write to `cache_dir`. Anyone who can write there can set repo config that runs commands.
+- **Commits outside the ref's history.** `git_show` (and any tool given a SHA) accepts any commit in the cached repo, not only ancestors of `ref`. Access control is per repo, so this gives no access beyond what `resolve_ref` on another branch gives. Note: `fetch --prune` removes refs but not objects, so commits from deleted or force-pushed branches stay readable by SHA until git garbage-collects them. Upstreams such as GitHub also serve such commits by SHA. If the cache must match the upstream exactly, run `git gc --prune=now` after a fetch that removed refs.
+- **Fetch URL of cached repos.** Fetch uses the `origin` URL saved at clone time. After a change to `base_url`, cached repos keep the old URL until they are evicted or the cache is cleared.
 
 ## Auth & Access Control
 
