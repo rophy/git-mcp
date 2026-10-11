@@ -1,0 +1,5 @@
+.git
+testdata
+docs
+*.md
+git-mcp
