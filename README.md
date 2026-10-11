@@ -12,10 +12,27 @@ git-mcp keeps bare mirrors of upstream repos on local disk and answers tool call
 | `search_code` | Regex search (`git grep -E`) with file paths and line numbers. |
 | `read_file` | Read a file with line numbers; optional line range. |
 | `list_files` | List files and directories, optionally recursive. |
-| `git_log` | Commit history (first parent), optionally for one path. |
+| `git_log` | Commit history, optionally for one path. Page with `count` (max 100) and `skip`. `first_parent: false` also lists commits inside merged branches. |
 | `git_show` | A commit's metadata and diff. |
 | `git_diff` | Diff between two refs; `merge_base: true` diffs from their common ancestor, like a pull request. |
 | `git_blame` | The commit that last changed each line of a file; optional line range. |
+
+### Result format
+
+Every tool returns a JSON object. On success, the MCP result has the object in `structuredContent`, and the SDK also puts the same JSON, as a string, in one `content` text block (for clients that do not read `structuredContent`). So the response carries the data twice; read one of them. On error, `isError` is `true` and `content` has one text block with the message; there is no `structuredContent`.
+
+| Tool | `structuredContent` | Where code text appears |
+|---|---|---|
+| `resolve_ref` | `{sha}` | — |
+| `search_code` | `{sha, matches: [{path, line_number, line_text}], truncated}` | `line_text`: one matched line |
+| `read_file` | `{sha, content}` | `content`: one string; each line is `<number>\t<line>\n` |
+| `list_files` | `{sha, entries: [{name, type}], truncated}` | — |
+| `git_log` | `{sha, commits: [{sha, author, date, message}], truncated}` | — |
+| `git_show` | `{sha, author, date, message, diff, truncated}` | `diff`: unified diff |
+| `git_diff` | `{base_sha, head_sha, diff, truncated}` | `diff`: unified diff |
+| `git_blame` | `{sha, lines: [{line, commit, text}], commits: {<sha>: {author, date, summary}}, truncated}` | `text`: one source line |
+
+`sha` is the commit that `ref` resolved to. `truncated: true` means an output limit cut the result; `read_file` returns an error instead when the file is larger than `max_file_size`.
 
 A branch that already exists in the cache is not fetched again. Use `resolve_ref` with `refresh: true` to get the latest commit. Tags and SHAs are served from the cache.
 
