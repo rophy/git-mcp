@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 
 	"github.com/rophy/git-mcp/internal/auth"
@@ -48,19 +47,14 @@ func main() {
 
 	executor := git.NewExecutor(cfg.Server.GitTimeout)
 
-	upstreamResolver := func(repo string) (string, string, error) {
-		host := strings.SplitN(repo, "/", 2)[0]
-		upstream, ok := cfg.Upstream[host]
-		if !ok {
-			return "", "", fmt.Errorf("no upstream configured for host %q", host)
-		}
-		return fmt.Sprintf("https://%s", repo), upstream.Token, nil
+	for _, host := range cfg.InsecureUpstreams() {
+		logger.Warn("upstream token is sent over plain http", "host", host)
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	cacheMgr := cache.NewManager(cfg.Server.CacheDir, executor, upstreamResolver)
+	cacheMgr := cache.NewManager(cfg.Server.CacheDir, executor, cfg.UpstreamURL)
 	var authenticator *auth.Authenticator
 	if !useStdio && len(cfg.Auth.Issuers) > 0 {
 		authenticator, err = auth.NewAuthenticator(ctx, cfg)

@@ -49,3 +49,44 @@ func TestServiceAllowsRepo(t *testing.T) {
 	assert.True(t, wild.AllowsRepo("github.com/org/anything"))
 	assert.False(t, wild.AllowsRepo("github.com/other/repo"))
 }
+
+func TestUpstreamURL(t *testing.T) {
+	cfg := &config.Config{Upstream: map[string]config.UpstreamConfig{
+		"github.com": {Token: "tok"},
+		"git.test":   {BaseURL: "http://gitserver:8080/"},
+	}}
+
+	tests := []struct {
+		name      string
+		repo      string
+		wantURL   string
+		wantToken string
+		wantErr   string
+	}{
+		{"default https", "github.com/org/repo", "https://github.com/org/repo", "tok", ""},
+		{"base_url replaces host", "git.test/org/repo", "http://gitserver:8080/org/repo", "", ""},
+		{"unknown host", "gitlab.com/org/repo", "", "", `no upstream configured for host "gitlab.com"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			url, token, err := cfg.UpstreamURL(tt.repo)
+			if tt.wantErr != "" {
+				require.EqualError(t, err, tt.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantURL, url)
+			assert.Equal(t, tt.wantToken, token)
+		})
+	}
+}
+
+func TestInsecureUpstreams(t *testing.T) {
+	cfg := &config.Config{Upstream: map[string]config.UpstreamConfig{
+		"github.com": {Token: "tok"},
+		"plain.test": {BaseURL: "http://plain"},
+		"leaky.test": {BaseURL: "HTTP://leaky", Token: "tok"},
+		"tls.test":   {BaseURL: "https://tls", Token: "tok"},
+	}}
+	assert.Equal(t, []string{"leaky.test"}, cfg.InsecureUpstreams())
+}

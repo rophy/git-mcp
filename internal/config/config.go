@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"sort"
 	"strings"
 	"time"
 
@@ -30,6 +31,33 @@ type ServerConfig struct {
 
 type UpstreamConfig struct {
 	Token string `yaml:"token"`
+	// BaseURL replaces "https://<host>" in clone URLs, e.g. "http://gitserver:8080".
+	BaseURL string `yaml:"base_url"`
+}
+
+// UpstreamURL returns the clone URL and token for repo ("<host>/<path>").
+func (c *Config) UpstreamURL(repo string) (string, string, error) {
+	host, repoPath, _ := strings.Cut(repo, "/")
+	upstream, ok := c.Upstream[host]
+	if !ok {
+		return "", "", fmt.Errorf("no upstream configured for host %q", host)
+	}
+	if upstream.BaseURL == "" {
+		return "https://" + repo, upstream.Token, nil
+	}
+	return strings.TrimRight(upstream.BaseURL, "/") + "/" + repoPath, upstream.Token, nil
+}
+
+// InsecureUpstreams returns the hosts that send a token over plain http.
+func (c *Config) InsecureUpstreams() []string {
+	var hosts []string
+	for host, upstream := range c.Upstream {
+		if upstream.Token != "" && strings.HasPrefix(strings.ToLower(upstream.BaseURL), "http://") {
+			hosts = append(hosts, host)
+		}
+	}
+	sort.Strings(hosts)
+	return hosts
 }
 
 type AuthConfig struct {

@@ -185,6 +185,8 @@ upstream:
     token: "${GITHUB_PAT}"
   gitlab.com:
     token: "${GITLAB_TOKEN}"
+  git.internal.example:              # optional base_url replaces "https://<host>"
+    base_url: "http://gitserver:8080"   # http + token logs a startup warning
 
 auth:
   audience: "git-mcp"
