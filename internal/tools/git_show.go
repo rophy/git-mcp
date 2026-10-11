@@ -60,7 +60,7 @@ func (h *GitShow) Execute(ctx context.Context, input GitShowInput) (*GitShowOutp
 	repoPath := h.cache.RepoPath(input.Repo)
 
 	format := "%H%x00%an <%ae>%x00%aI%x00%B"
-	metaOut, err := h.executor.Run(ctx, repoPath, "show", "--no-patch", fmt.Sprintf("--format=%s", format), "--end-of-options", input.Commit)
+	metaOut, metaTruncated, err := h.executor.RunLimited(ctx, repoPath, h.maxDiffSize, "show", "--no-patch", fmt.Sprintf("--format=%s", format), "--end-of-options", input.Commit)
 	if err != nil {
 		return nil, err
 	}
@@ -75,14 +75,16 @@ func (h *GitShow) Execute(ctx context.Context, input GitShowInput) (*GitShowOutp
 		diffArgs = append(diffArgs, "--", input.Path)
 	}
 
-	diff, err := h.executor.Run(ctx, repoPath, diffArgs...)
+	diff, truncated, err := h.executor.RunLimited(ctx, repoPath, h.maxDiffSize, diffArgs...)
 	if err != nil {
 		return nil, err
 	}
-
-	truncated := false
-	if len(diff) > h.maxDiffSize {
-		diff = diff[:h.maxDiffSize]
+	if truncated {
+		diff = trimPartialRune(diff)
+	}
+	message := fields[3]
+	if metaTruncated {
+		message = trimPartialRune(message)
 		truncated = true
 	}
 
@@ -90,7 +92,7 @@ func (h *GitShow) Execute(ctx context.Context, input GitShowInput) (*GitShowOutp
 		SHA:       sha,
 		Author:    fields[1],
 		Date:      fields[2],
-		Message:   strings.TrimSpace(fields[3]),
+		Message:   strings.TrimSpace(message),
 		Diff:      diff,
 		Truncated: truncated,
 	}, nil

@@ -18,13 +18,14 @@ type Config struct {
 }
 
 type ServerConfig struct {
-	Listen       string        `yaml:"listen"`
-	CacheDir     string        `yaml:"cache_dir"`
-	MaxCacheSize string        `yaml:"max_cache_size"`
-	MaxFileSize  string        `yaml:"max_file_size"`
-	MaxMatches   int           `yaml:"max_matches"`
-	MaxDiffSize  string        `yaml:"max_diff_size"`
-	GitTimeout   time.Duration `yaml:"git_timeout"`
+	Listen        string        `yaml:"listen"`
+	CacheDir      string        `yaml:"cache_dir"`
+	MaxCacheSize  string        `yaml:"max_cache_size"`
+	MaxFileSize   string        `yaml:"max_file_size"`
+	MaxMatches    int           `yaml:"max_matches"`
+	MaxDiffSize   string        `yaml:"max_diff_size"`
+	MaxOutputSize string        `yaml:"max_output_size"`
+	GitTimeout    time.Duration `yaml:"git_timeout"`
 }
 
 type UpstreamConfig struct {

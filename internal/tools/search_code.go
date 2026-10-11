@@ -32,13 +32,14 @@ type SearchCodeOutput struct {
 }
 
 type SearchCode struct {
-	cache      *cache.Manager
-	executor   *git.Executor
-	maxMatches int
+	cache         *cache.Manager
+	executor      *git.Executor
+	maxMatches    int
+	maxOutputSize int
 }
 
-func NewSearchCode(cache *cache.Manager, executor *git.Executor, maxMatches int) *SearchCode {
-	return &SearchCode{cache: cache, executor: executor, maxMatches: maxMatches}
+func NewSearchCode(cache *cache.Manager, executor *git.Executor, maxMatches, maxOutputSize int) *SearchCode {
+	return &SearchCode{cache: cache, executor: executor, maxMatches: maxMatches, maxOutputSize: maxOutputSize}
 }
 
 func (h *SearchCode) Execute(ctx context.Context, input SearchCodeInput) (*SearchCodeOutput, error) {
@@ -73,7 +74,7 @@ func (h *SearchCode) Execute(ctx context.Context, input SearchCodeInput) (*Searc
 		args = append(args, "--", input.Path)
 	}
 
-	out, err := h.executor.Run(ctx, repoPath, args...)
+	out, outTruncated, err := h.executor.RunLimited(ctx, repoPath, h.maxOutputSize, args...)
 	if err != nil {
 		if strings.Contains(err.Error(), "exit status 1") {
 			return &SearchCodeOutput{SHA: sha, Matches: []SearchMatch{}}, nil
@@ -81,10 +82,11 @@ func (h *SearchCode) Execute(ctx context.Context, input SearchCodeInput) (*Searc
 		return nil, err
 	}
 
-	lines := strings.Split(out, "\n")
-	truncated := len(lines) > limit
-	if truncated {
+	lines := strings.Split(completeLines(out, outTruncated), "\n")
+	truncated := outTruncated
+	if len(lines) > limit {
 		lines = lines[:limit]
+		truncated = true
 	}
 
 	matches := make([]SearchMatch, 0, len(lines))

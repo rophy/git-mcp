@@ -255,6 +255,7 @@ server:
   max_file_size: "1MB"
   max_matches: 50
   max_diff_size: "500KB"
+  max_output_size: "1MB"         # search_code, list_files, git_log
   git_timeout: "30s"
 ```
 

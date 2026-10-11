@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/rophy/git-mcp/internal/cache"
 	"github.com/rophy/git-mcp/internal/git"
@@ -40,6 +41,8 @@ func setupTestRepo(t *testing.T) (cacheManager *cache.Manager, repo string, head
 	require.NoError(t, os.MkdirAll(filepath.Join(workDir, "src"), 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(workDir, "src/main.go"), []byte("package main\n\nfunc main() {\n\tprintln(\"hello\")\n}\n"), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(workDir, "README.md"), []byte("# Test\n"), 0o644))
+	require.NoError(t, os.MkdirAll(filepath.Join(workDir, "docs"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(workDir, "docs/utf8.txt"), []byte(strings.Repeat("é", 100)+"\n"), 0o644))
 	run("git", "add", ".")
 	run("git", "-c", "commit.gpgsign=false", "commit", "-m", "initial commit")
 	sha := run("git", "rev-parse", "HEAD")
@@ -102,7 +105,7 @@ func TestReadFile_LineRange(t *testing.T) {
 func TestSearchCode(t *testing.T) {
 	mgr, repo, _ := setupTestRepo(t)
 	executor := git.NewExecutor(30 * time.Second)
-	handler := tools.NewSearchCode(mgr, executor, 50)
+	handler := tools.NewSearchCode(mgr, executor, 50, 1024*1024)
 
 	result, err := handler.Execute(context.Background(), tools.SearchCodeInput{
 		Repo: repo, Ref: "main", Pattern: "hello",
@@ -115,7 +118,7 @@ func TestSearchCode(t *testing.T) {
 func TestSearchCode_NoMatch(t *testing.T) {
 	mgr, repo, _ := setupTestRepo(t)
 	executor := git.NewExecutor(30 * time.Second)
-	handler := tools.NewSearchCode(mgr, executor, 50)
+	handler := tools.NewSearchCode(mgr, executor, 50, 1024*1024)
 
 	result, err := handler.Execute(context.Background(), tools.SearchCodeInput{
 		Repo: repo, Ref: "main", Pattern: "zzzznomatch",
@@ -127,7 +130,7 @@ func TestSearchCode_NoMatch(t *testing.T) {
 func TestListFiles(t *testing.T) {
 	mgr, repo, _ := setupTestRepo(t)
 	executor := git.NewExecutor(30 * time.Second)
-	handler := tools.NewListFiles(mgr, executor)
+	handler := tools.NewListFiles(mgr, executor, 1024*1024)
 
 	result, err := handler.Execute(context.Background(), tools.ListFilesInput{
 		Repo: repo, Ref: "main",
@@ -144,7 +147,7 @@ func TestListFiles(t *testing.T) {
 func TestGitLog(t *testing.T) {
 	mgr, repo, _ := setupTestRepo(t)
 	executor := git.NewExecutor(30 * time.Second)
-	handler := tools.NewGitLog(mgr, executor)
+	handler := tools.NewGitLog(mgr, executor, 1024*1024)
 
 	result, err := handler.Execute(context.Background(), tools.GitLogInput{
 		Repo: repo, Ref: "main", Count: 10,
@@ -165,4 +168,80 @@ func TestGitShow(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "initial commit", result.Message)
 	assert.Contains(t, result.Diff, "main.go")
+}
+
+func TestReadFile_TooLarge(t *testing.T) {
+	mgr, repo, _ := setupTestRepo(t)
+	executor := git.NewExecutor(30 * time.Second)
+	handler := tools.NewReadFile(mgr, executor, 10)
+
+	_, err := handler.Execute(context.Background(), tools.ReadFileInput{
+		Repo: repo, Ref: "main", Path: "src/main.go",
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "exceeds max size")
+}
+
+func TestGitShow_TruncatesAtRuneBoundary(t *testing.T) {
+	mgr, repo, headSHA := setupTestRepo(t)
+	executor := git.NewExecutor(30 * time.Second)
+	input := tools.GitShowInput{Repo: repo, Ref: "main", Commit: headSHA}
+
+	full, err := tools.NewGitShow(mgr, executor, 500*1024).Execute(context.Background(), input)
+	require.NoError(t, err)
+	idx := strings.Index(full.Diff, "é")
+	require.Positive(t, idx)
+
+	// Limit falls inside the 2-byte rune.
+	result, err := tools.NewGitShow(mgr, executor, idx+1).Execute(context.Background(), input)
+	require.NoError(t, err)
+	assert.True(t, result.Truncated)
+	assert.True(t, utf8.ValidString(result.Diff))
+	assert.Equal(t, full.Diff[:idx], result.Diff)
+}
+
+func TestSearchCode_OutputLimit(t *testing.T) {
+	mgr, repo, _ := setupTestRepo(t)
+	executor := git.NewExecutor(30 * time.Second)
+	input := tools.SearchCodeInput{Repo: repo, Ref: "main", Pattern: "."}
+
+	full, err := tools.NewSearchCode(mgr, executor, 50, 1024*1024).Execute(context.Background(), input)
+	require.NoError(t, err)
+	require.Greater(t, len(full.Matches), 2)
+
+	// Room for the first match line plus part of the second.
+	result, err := tools.NewSearchCode(mgr, executor, 50, 150).Execute(context.Background(), input)
+	require.NoError(t, err)
+	assert.True(t, result.Truncated)
+	require.NotEmpty(t, result.Matches)
+	assert.Equal(t, full.Matches[:len(result.Matches)], result.Matches)
+}
+
+func TestListFiles_OutputLimit(t *testing.T) {
+	mgr, repo, _ := setupTestRepo(t)
+	executor := git.NewExecutor(30 * time.Second)
+	input := tools.ListFilesInput{Repo: repo, Ref: "main", Recursive: true}
+
+	full, err := tools.NewListFiles(mgr, executor, 1024*1024).Execute(context.Background(), input)
+	require.NoError(t, err)
+	assert.False(t, full.Truncated)
+	require.Greater(t, len(full.Entries), 1)
+
+	// Room for the first ls-tree line plus part of the second.
+	result, err := tools.NewListFiles(mgr, executor, 80).Execute(context.Background(), input)
+	require.NoError(t, err)
+	assert.True(t, result.Truncated)
+	assert.Equal(t, full.Entries[:1], result.Entries)
+}
+
+func TestGitLog_OutputLimit(t *testing.T) {
+	mgr, repo, _ := setupTestRepo(t)
+	executor := git.NewExecutor(30 * time.Second)
+
+	result, err := tools.NewGitLog(mgr, executor, 50).Execute(context.Background(), tools.GitLogInput{
+		Repo: repo, Ref: "main",
+	})
+	require.NoError(t, err)
+	assert.True(t, result.Truncated)
+	assert.Empty(t, result.Commits)
 }

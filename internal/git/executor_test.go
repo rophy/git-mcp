@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -67,4 +68,41 @@ func TestExecutorSanitizesEnv(t *testing.T) {
 	out, err := exec.Run(context.Background(), repoDir, "rev-parse", "--verify", "HEAD")
 	require.NoError(t, err)
 	assert.Len(t, out, 40)
+}
+
+func TestExecutorRunLimited_UnderLimit(t *testing.T) {
+	repoDir := setupBareRepo(t)
+	exec := git.NewExecutor(30 * time.Second)
+
+	out, truncated, err := exec.RunLimited(context.Background(), repoDir, 100, "rev-parse", "--verify", "HEAD")
+	require.NoError(t, err)
+	assert.False(t, truncated)
+	assert.Len(t, out, 40)
+}
+
+func TestExecutorRunLimited_OverLimit(t *testing.T) {
+	repoDir := setupBareRepo(t)
+	exec := git.NewExecutor(30 * time.Second)
+
+	out, truncated, err := exec.RunLimited(context.Background(), repoDir, 10, "rev-parse", "--verify", "HEAD")
+	require.NoError(t, err)
+	assert.True(t, truncated)
+	assert.Len(t, out, 10)
+}
+
+func TestExecutorRunLimited_StopsLargeOutput(t *testing.T) {
+	repoDir := setupBareRepo(t)
+	exec := git.NewExecutor(30 * time.Second)
+
+	bigFile := filepath.Join(t.TempDir(), "big")
+	require.NoError(t, os.WriteFile(bigFile, []byte(strings.Repeat("x", 1<<20)), 0o644))
+	blob, err := exec.Run(context.Background(), repoDir, "hash-object", "-w", bigFile)
+	require.NoError(t, err)
+
+	start := time.Now()
+	out, truncated, err := exec.RunLimited(context.Background(), repoDir, 1024, "cat-file", "blob", blob)
+	require.NoError(t, err)
+	assert.True(t, truncated)
+	assert.Len(t, out, 1024)
+	assert.Less(t, time.Since(start), 5*time.Second)
 }

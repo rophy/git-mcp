@@ -64,7 +64,7 @@ func TestIntegration_FullWorkflow(t *testing.T) {
 	sha := refResult.SHA
 
 	// 2. search_code
-	search := tools.NewSearchCode(mgr, executor, 50)
+	search := tools.NewSearchCode(mgr, executor, 50, 1024*1024)
 	searchResult, err := search.Execute(ctx, tools.SearchCodeInput{Repo: repo, Ref: sha, Pattern: "Handle"})
 	require.NoError(t, err)
 	assert.GreaterOrEqual(t, len(searchResult.Matches), 1)
@@ -76,13 +76,13 @@ func TestIntegration_FullWorkflow(t *testing.T) {
 	assert.Contains(t, readResult.Content, "func Handle")
 
 	// 4. list_files
-	list := tools.NewListFiles(mgr, executor)
+	list := tools.NewListFiles(mgr, executor, 1024*1024)
 	listResult, err := list.Execute(ctx, tools.ListFilesInput{Repo: repo, Ref: sha})
 	require.NoError(t, err)
 	assert.GreaterOrEqual(t, len(listResult.Entries), 1)
 
 	// 5. git_log
-	log := tools.NewGitLog(mgr, executor)
+	log := tools.NewGitLog(mgr, executor, 1024*1024)
 	logResult, err := log.Execute(ctx, tools.GitLogInput{Repo: repo, Ref: sha, Count: 10})
 	require.NoError(t, err)
 	assert.Equal(t, "add handler", logResult.Commits[0].Message)

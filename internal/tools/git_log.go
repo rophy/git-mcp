@@ -25,17 +25,19 @@ type LogEntry struct {
 }
 
 type GitLogOutput struct {
-	SHA     string     `json:"sha"`
-	Commits []LogEntry `json:"commits"`
+	SHA       string     `json:"sha"`
+	Commits   []LogEntry `json:"commits"`
+	Truncated bool       `json:"truncated"`
 }
 
 type GitLog struct {
-	cache    *cache.Manager
-	executor *git.Executor
+	cache         *cache.Manager
+	executor      *git.Executor
+	maxOutputSize int
 }
 
-func NewGitLog(cache *cache.Manager, executor *git.Executor) *GitLog {
-	return &GitLog{cache: cache, executor: executor}
+func NewGitLog(cache *cache.Manager, executor *git.Executor, maxOutputSize int) *GitLog {
+	return &GitLog{cache: cache, executor: executor, maxOutputSize: maxOutputSize}
 }
 
 func (h *GitLog) Execute(ctx context.Context, input GitLogInput) (*GitLogOutput, error) {
@@ -71,13 +73,13 @@ func (h *GitLog) Execute(ctx context.Context, input GitLogInput) (*GitLogOutput,
 		args = append(args, "--", input.Path)
 	}
 
-	out, err := h.executor.Run(ctx, repoPath, args...)
+	out, truncated, err := h.executor.RunLimited(ctx, repoPath, h.maxOutputSize, args...)
 	if err != nil {
 		return nil, err
 	}
 
 	commits := []LogEntry{}
-	for _, record := range strings.Split(out, "\n") {
+	for _, record := range strings.Split(completeLines(out, truncated), "\n") {
 		if record == "" {
 			continue
 		}
@@ -93,7 +95,7 @@ func (h *GitLog) Execute(ctx context.Context, input GitLogInput) (*GitLogOutput,
 		})
 	}
 
-	return &GitLogOutput{SHA: sha, Commits: commits}, nil
+	return &GitLogOutput{SHA: sha, Commits: commits, Truncated: truncated}, nil
 }
 
 func (i *GitLogInput) GetRepo() string { return i.Repo }

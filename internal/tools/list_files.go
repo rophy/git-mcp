@@ -22,17 +22,19 @@ type FileEntry struct {
 }
 
 type ListFilesOutput struct {
-	SHA     string      `json:"sha"`
-	Entries []FileEntry `json:"entries"`
+	SHA       string      `json:"sha"`
+	Entries   []FileEntry `json:"entries"`
+	Truncated bool        `json:"truncated"`
 }
 
 type ListFiles struct {
-	cache    *cache.Manager
-	executor *git.Executor
+	cache         *cache.Manager
+	executor      *git.Executor
+	maxOutputSize int
 }
 
-func NewListFiles(cache *cache.Manager, executor *git.Executor) *ListFiles {
-	return &ListFiles{cache: cache, executor: executor}
+func NewListFiles(cache *cache.Manager, executor *git.Executor, maxOutputSize int) *ListFiles {
+	return &ListFiles{cache: cache, executor: executor, maxOutputSize: maxOutputSize}
 }
 
 func (h *ListFiles) Execute(ctx context.Context, input ListFilesInput) (*ListFilesOutput, error) {
@@ -64,13 +66,13 @@ func (h *ListFiles) Execute(ctx context.Context, input ListFilesInput) (*ListFil
 	}
 	args = append(args, "--end-of-options", target)
 
-	out, err := h.executor.Run(ctx, repoPath, args...)
+	out, truncated, err := h.executor.RunLimited(ctx, repoPath, h.maxOutputSize, args...)
 	if err != nil {
 		return nil, err
 	}
 
 	entries := []FileEntry{}
-	for _, line := range strings.Split(out, "\n") {
+	for _, line := range strings.Split(completeLines(out, truncated), "\n") {
 		if line == "" {
 			continue
 		}
@@ -90,7 +92,7 @@ func (h *ListFiles) Execute(ctx context.Context, input ListFilesInput) (*ListFil
 		entries = append(entries, FileEntry{Name: line[tabIdx+1:], Type: entryType})
 	}
 
-	return &ListFilesOutput{SHA: sha, Entries: entries}, nil
+	return &ListFilesOutput{SHA: sha, Entries: entries, Truncated: truncated}, nil
 }
 
 func (i *ListFilesInput) GetRepo() string { return i.Repo }

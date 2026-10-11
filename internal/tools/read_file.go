@@ -53,12 +53,12 @@ func (h *ReadFile) Execute(ctx context.Context, input ReadFileInput) (*ReadFileO
 	}
 
 	repoPath := h.cache.RepoPath(input.Repo)
-	content, err := h.executor.Run(ctx, repoPath, "cat-file", "blob", fmt.Sprintf("%s:%s", sha, input.Path))
+	content, truncated, err := h.executor.RunLimited(ctx, repoPath, h.maxFileSize, "cat-file", "blob", fmt.Sprintf("%s:%s", sha, input.Path))
 	if err != nil {
 		return nil, err
 	}
 
-	if len(content) > h.maxFileSize {
+	if truncated {
 		return nil, fmt.Errorf("file exceeds max size (%d bytes)", h.maxFileSize)
 	}
 
