@@ -2,6 +2,7 @@ package tools_test
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -63,6 +64,16 @@ func setupTestRepo(t *testing.T) (cacheManager *cache.Manager, repo string, head
 		run("git", "add", ".")
 		run("git", "-c", "commit.gpgsign=false", "commit", "-m", "add "+branch)
 	}
+
+	// Branch "merged" merges "pr" (two commits) into main with a merge commit.
+	run("git", "checkout", "-q", "-b", "pr", "main")
+	for i := 1; i <= 2; i++ {
+		require.NoError(t, os.WriteFile(filepath.Join(workDir, "pr.txt"), []byte(fmt.Sprintf("pr %d\n", i)), 0o644))
+		run("git", "add", ".")
+		run("git", "-c", "commit.gpgsign=false", "commit", "-m", fmt.Sprintf("DBZ-1: pr commit %d", i))
+	}
+	run("git", "checkout", "-q", "-b", "merged", "main")
+	run("git", "-c", "commit.gpgsign=false", "merge", "-q", "--no-ff", "-m", "Merge pr", "pr")
 	run("git", "checkout", "-q", "main")
 
 	bareDir := filepath.Join(dir, "upstream.git")
@@ -474,4 +485,51 @@ func TestGitBlame_RejectsInvalidInput(t *testing.T) {
 		_, err := handler.Execute(context.Background(), in)
 		assert.Error(t, err, "%+v", in)
 	}
+}
+
+func logMessages(commits []tools.LogEntry) []string {
+	msgs := make([]string, len(commits))
+	for i, c := range commits {
+		msgs[i] = c.Message
+	}
+	return msgs
+}
+
+func TestGitLog_FirstParentByDefault(t *testing.T) {
+	mgr, repo, _ := setupTestRepo(t)
+	executor := git.NewExecutor(30 * time.Second)
+	handler := tools.NewGitLog(mgr, executor, 1024*1024)
+
+	result, err := handler.Execute(context.Background(), tools.GitLogInput{Repo: repo, Ref: "merged"})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"Merge pr", "initial commit"}, logMessages(result.Commits))
+}
+
+func TestGitLog_AllParents(t *testing.T) {
+	mgr, repo, _ := setupTestRepo(t)
+	executor := git.NewExecutor(30 * time.Second)
+	handler := tools.NewGitLog(mgr, executor, 1024*1024)
+
+	firstParent := false
+	result, err := handler.Execute(context.Background(), tools.GitLogInput{Repo: repo, Ref: "merged", FirstParent: &firstParent})
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{"Merge pr", "DBZ-1: pr commit 2", "DBZ-1: pr commit 1", "initial commit"}, logMessages(result.Commits))
+}
+
+func TestGitLog_Skip(t *testing.T) {
+	mgr, repo, _ := setupTestRepo(t)
+	executor := git.NewExecutor(30 * time.Second)
+	handler := tools.NewGitLog(mgr, executor, 1024*1024)
+	firstParent := false
+
+	full, err := handler.Execute(context.Background(), tools.GitLogInput{Repo: repo, Ref: "merged", FirstParent: &firstParent})
+	require.NoError(t, err)
+	require.Len(t, full.Commits, 4)
+
+	page, err := handler.Execute(context.Background(), tools.GitLogInput{Repo: repo, Ref: "merged", FirstParent: &firstParent, Count: 2, Skip: 2})
+	require.NoError(t, err)
+	assert.Equal(t, full.Commits[2:], page.Commits)
+
+	_, err = handler.Execute(context.Background(), tools.GitLogInput{Repo: repo, Ref: "merged", Skip: -1})
+	assert.Error(t, err)
 }

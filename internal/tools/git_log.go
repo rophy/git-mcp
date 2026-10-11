@@ -15,6 +15,10 @@ type GitLogInput struct {
 	Ref   string `json:"ref"`
 	Count int    `json:"count,omitempty"`
 	Path  string `json:"path,omitempty"`
+	// Skip is the number of commits to skip, for paging.
+	Skip int `json:"skip,omitempty"`
+	// FirstParent follows only the first parent of merge commits (default true).
+	FirstParent *bool `json:"first_parent,omitempty"`
 }
 
 type LogEntry struct {
@@ -60,6 +64,9 @@ func (h *GitLog) Execute(ctx context.Context, input GitLogInput) (*GitLogOutput,
 	if count > 100 {
 		count = 100
 	}
+	if input.Skip < 0 {
+		return nil, fmt.Errorf("skip must not be negative")
+	}
 
 	sha, release, err := h.cache.Ensure(ctx, input.Repo, input.Ref, false)
 	if err != nil {
@@ -69,7 +76,11 @@ func (h *GitLog) Execute(ctx context.Context, input GitLogInput) (*GitLogOutput,
 
 	repoPath := h.cache.RepoPath(input.Repo)
 	format := "%H%x00%an <%ae>%x00%aI%x00%s%x00"
-	args := []string{"log", "--first-parent", fmt.Sprintf("--format=%s", format), fmt.Sprintf("-n%d", count), "--end-of-options", sha}
+	args := []string{"log", fmt.Sprintf("--format=%s", format), fmt.Sprintf("-n%d", count), fmt.Sprintf("--skip=%d", input.Skip)}
+	if input.FirstParent == nil || *input.FirstParent {
+		args = append(args, "--first-parent")
+	}
+	args = append(args, "--end-of-options", sha)
 	if input.Path != "" {
 		args = append(args, "--", input.Path)
 	}

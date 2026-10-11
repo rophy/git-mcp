@@ -150,12 +150,12 @@ git ls-tree --name-only <sha> <path>
 ### git_log
 
 ```
-git log --first-parent --format=<format> <sha> -- [<pathspec>]
+git log [--first-parent] --format=<format> -n<count> --skip=<skip> <sha> -- [<pathspec>]
 ```
 
-- **Inputs:** `repo`, `ref`, `count` (default 20, max 100), `path` (optional pathspec)
-- **Returns:** list of `{sha, author, date, message}`
-- Always `--first-parent` for cleaner history
+- **Inputs:** `repo`, `ref`, `count` (default 20, max 100), `path` (optional pathspec), `skip` (optional, for paging), `first_parent` (optional, default true)
+- **Returns:** `{sha, commits: [{sha, author, date, message}], truncated}`; `message` is the subject line
+- `first_parent: true` gives one entry per merged pull request. Set it to false to also list the commits inside merged branches (their own messages, authors and issue keys).
 
 ### git_show
 
