@@ -10,7 +10,7 @@ import (
 type ResolveRefInput struct {
 	Repo    string `json:"repo"`
 	Ref     string `json:"ref"`
-	Refresh bool   `json:"refresh"`
+	Refresh bool   `json:"refresh,omitempty"`
 }
 
 type ResolveRefOutput struct {
