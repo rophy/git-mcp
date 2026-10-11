@@ -4,7 +4,7 @@ server:
   git_timeout: "30s"
 upstream:
   github.com:
-    token: "${TEST_TOKEN}"
+    base_url: "${TEST_BASE_URL}"
 auth:
   audience: "git-mcp"
   issuers: []

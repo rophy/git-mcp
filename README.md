@@ -92,10 +92,11 @@ server:
   git_timeout: "30s"          # per git command
 
 upstream:
-  github.com:
-    token: "${GITHUB_TOKEN}"  # read-only token; ${VAR} is expanded from the environment
+  git.example.com: {}                   # public repos: no credentials
   git.example.internal:
     base_url: "http://gitserver:8080"   # optional; default is https://<host>
+    username: "git-mcp"                 # HTTP credentials, given to git only when the upstream asks
+    password_env: "GIT_INTERNAL_TOKEN"  # NAME of the env var that holds the password or token
 
 auth:
   audience: "git-mcp"
@@ -109,13 +110,17 @@ services:
     issuer: "corp-oauth"
     subject: "sre-bot-client-id"
     repos:
-      - "github.com/org/*"            # every repo directly under github.com/org
-      - "github.com/other/one-repo"
+      - "git.example.com/org/*"       # every repo directly under git.example.com/org
+      - "git.example.com/other/one-repo"
 ```
 
 Sizes accept `B`, `KB`, `MB` and `GB` (base 1024, any case). An invalid size stops startup.
 
-A repo name is `<host>/<path>`, for example `github.com/org/repo`. Its clone URL is `https://<host>/<path>`, or `<base_url>/<path>` when `base_url` is set. git-mcp logs a warning at startup if a token would be sent over plain `http://`.
+A repo name is `<host>/<path>`, for example `github.com/org/repo`. Its clone URL is `https://<host>/<path>`, or `<base_url>/<path>` when `base_url` is set.
+
+**No secrets in the config file.** A password or token is read only from the env var that `password_env` names; startup fails if that var is empty. A `token` or `password` field, credentials in `base_url` (`https://user:pass@...`), and unknown fields are rejected. `${VAR}` references in the file are expanded from the environment.
+
+git-mcp gives the credentials to git through git's standard credential helper protocol, from environment variables: git sends them (HTTP Basic auth) only after the upstream answers `401`, and they are never written to the cached repo or put on a command line. Use the username and password or token that your git host accepts for HTTPS clones. git-mcp logs a warning at startup if a password would be sent over plain `http://`.
 
 ## Authentication and access
 

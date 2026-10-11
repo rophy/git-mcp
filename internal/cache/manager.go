@@ -16,7 +16,9 @@ import (
 	"github.com/rophy/git-mcp/internal/toolerr"
 )
 
-type UpstreamResolver func(repo string) (url string, token string, err error)
+// UpstreamResolver returns the clone URL of repo and the HTTP credentials to
+// give git when the upstream asks for them (empty username: none).
+type UpstreamResolver func(repo string) (url, username, password string, err error)
 
 // trashDir holds evicted repos until they are deleted, and cloneDir holds
 // clones in progress. Their names have no ".git" suffix, so they never match a
@@ -300,7 +302,7 @@ func (m *Manager) resolveRef(ctx context.Context, repoPath, ref string) (string,
 }
 
 func (m *Manager) cloneRepo(ctx context.Context, repo, repoPath string) error {
-	url, token, err := m.resolve(repo)
+	url, username, password, err := m.resolve(repo)
 	if err != nil {
 		return toolerr.New(toolerr.InvalidInput, err)
 	}
@@ -318,7 +320,7 @@ func (m *Manager) cloneRepo(ctx context.Context, repo, repoPath string) error {
 	defer os.RemoveAll(tmp)
 
 	tmpRepo := filepath.Join(tmp, "repo")
-	if _, err := m.executor.RunWithEnv(ctx, ".", authEnv(token), "clone", "--bare", "--end-of-options", url, tmpRepo); err != nil {
+	if _, err := m.executor.RunWithEnv(ctx, ".", credentialEnv(username, password), "clone", "--bare", "--end-of-options", url, tmpRepo); err != nil {
 		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(repoPath), 0o755); err != nil {
@@ -328,22 +330,29 @@ func (m *Manager) cloneRepo(ctx context.Context, repo, repoPath string) error {
 }
 
 func (m *Manager) fetchRepo(ctx context.Context, repo, repoPath string) error {
-	_, token, err := m.resolve(repo)
+	_, username, password, err := m.resolve(repo)
 	if err != nil {
 		return toolerr.New(toolerr.InvalidInput, err)
 	}
 
-	_, err = m.executor.RunWithEnv(ctx, repoPath, authEnv(token), "fetch", "--prune", "--end-of-options", "origin", "+refs/heads/*:refs/heads/*", "+refs/tags/*:refs/tags/*")
+	_, err = m.executor.RunWithEnv(ctx, repoPath, credentialEnv(username, password), "fetch", "--prune", "--end-of-options", "origin", "+refs/heads/*:refs/heads/*", "+refs/tags/*:refs/tags/*")
 	return err
 }
 
-func authEnv(token string) []string {
-	if token == "" {
+// credentialHelper answers git's standard credential requests from the
+// environment, so the password is not on a command line or in a config file.
+// git asks only after the upstream returns 401, then uses HTTP Basic auth.
+const credentialHelper = `!f() { test "$1" = get || exit 0; printf 'username=%s\npassword=%s\n' "$GIT_MCP_USERNAME" "$GIT_MCP_PASSWORD"; }; f`
+
+func credentialEnv(username, password string) []string {
+	if username == "" {
 		return nil
 	}
 	return []string{
 		"GIT_CONFIG_COUNT=1",
-		"GIT_CONFIG_KEY_0=http.extraHeader",
-		"GIT_CONFIG_VALUE_0=Authorization: Bearer " + token,
+		"GIT_CONFIG_KEY_0=credential.helper",
+		"GIT_CONFIG_VALUE_0=" + credentialHelper,
+		"GIT_MCP_USERNAME=" + username,
+		"GIT_MCP_PASSWORD=" + password,
 	}
 }

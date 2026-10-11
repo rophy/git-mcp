@@ -21,6 +21,8 @@ services:
     image: nginx:1.27-alpine
     volumes:
       - upstream:/usr/share/nginx/html:ro
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./htpasswd:/etc/nginx/htpasswd:ro
     depends_on:
       fixtures:
         condition: service_completed_successfully
@@ -34,6 +36,9 @@ services:
     volumes:
       - ./config.yaml:/etc/git-mcp/config.yaml:ro
       - cache:/data/repos
+    environment:
+      # Test-only password for /private/ on gitserver (see htpasswd).
+      E2E_UPSTREAM_PASSWORD: e2e-only-password
     depends_on:
       gitserver:
         condition: service_healthy

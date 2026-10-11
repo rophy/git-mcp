@@ -139,8 +139,8 @@ func newTestServer(t *testing.T, authenticator *auth.Authenticator) (*mcp.Server
 	sha := run("rev-parse", "HEAD")
 
 	executor := git.NewExecutor(30 * time.Second)
-	mgr, err := cache.NewManager(filepath.Join(dir, "cache"), 0, executor, func(string) (string, string, error) {
-		return work, "", nil
+	mgr, err := cache.NewManager(filepath.Join(dir, "cache"), 0, executor, func(string) (string, string, string, error) {
+		return work, "", "", nil
 	})
 	require.NoError(t, err)
 

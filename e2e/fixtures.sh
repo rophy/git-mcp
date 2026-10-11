@@ -28,4 +28,5 @@ make_repo() {
 make_repo org/repo-a
 make_repo org/repo-b
 make_repo other/secret
+make_repo private/org/repo
 chmod -R a+rX /srv/git

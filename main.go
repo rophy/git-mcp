@@ -48,7 +48,7 @@ func main() {
 	executor := git.NewExecutor(cfg.Server.GitTimeout)
 
 	for _, host := range cfg.InsecureUpstreams() {
-		logger.Warn("upstream token is sent over plain http", "host", host)
+		logger.Warn("upstream password is sent over plain http", "host", host)
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

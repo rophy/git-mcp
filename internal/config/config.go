@@ -1,7 +1,11 @@
 package config
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
+	"io"
+	"net/url"
 	"os"
 	"path"
 	"sort"
@@ -36,30 +40,38 @@ type ServerConfig struct {
 	MaxOutputBytes int   `yaml:"-"`
 }
 
+// UpstreamConfig holds no secrets: the password (or token) is read from the
+// env var named by PasswordEnv.
 type UpstreamConfig struct {
-	Token string `yaml:"token"`
 	// BaseURL replaces "https://<host>" in clone URLs, e.g. "http://gitserver:8080".
 	BaseURL string `yaml:"base_url"`
+	// Username and the password from PasswordEnv are given to git as HTTP
+	// credentials when the upstream asks for them.
+	Username    string `yaml:"username"`
+	PasswordEnv string `yaml:"password_env"`
+
+	// Password is read from PasswordEnv by Load; it is never read from the file.
+	Password string `yaml:"-"`
 }
 
-// UpstreamURL returns the clone URL and token for repo ("<host>/<path>").
-func (c *Config) UpstreamURL(repo string) (string, string, error) {
+// UpstreamURL returns the clone URL and credentials for repo ("<host>/<path>").
+func (c *Config) UpstreamURL(repo string) (url, username, password string, err error) {
 	host, repoPath, _ := strings.Cut(repo, "/")
 	upstream, ok := c.Upstream[host]
 	if !ok {
-		return "", "", fmt.Errorf("no upstream configured for host %q", host)
+		return "", "", "", fmt.Errorf("no upstream configured for host %q", host)
 	}
 	if upstream.BaseURL == "" {
-		return "https://" + repo, upstream.Token, nil
+		return "https://" + repo, upstream.Username, upstream.Password, nil
 	}
-	return strings.TrimRight(upstream.BaseURL, "/") + "/" + repoPath, upstream.Token, nil
+	return strings.TrimRight(upstream.BaseURL, "/") + "/" + repoPath, upstream.Username, upstream.Password, nil
 }
 
-// InsecureUpstreams returns the hosts that send a token over plain http.
+// InsecureUpstreams returns the hosts that would send a password over plain http.
 func (c *Config) InsecureUpstreams() []string {
 	var hosts []string
 	for host, upstream := range c.Upstream {
-		if upstream.Token != "" && strings.HasPrefix(strings.ToLower(upstream.BaseURL), "http://") {
+		if upstream.Password != "" && strings.HasPrefix(strings.ToLower(upstream.BaseURL), "http://") {
 			hosts = append(hosts, host)
 		}
 	}
@@ -109,11 +121,19 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("read config: %w", err)
 	}
 
-	expanded := os.ExpandEnv(string(data))
+	expanded := []byte(os.ExpandEnv(string(data)))
+	if err := rejectSecretFields(expanded); err != nil {
+		return nil, err
+	}
 
 	var cfg Config
-	if err := yaml.Unmarshal([]byte(expanded), &cfg); err != nil {
+	dec := yaml.NewDecoder(bytes.NewReader(expanded))
+	dec.KnownFields(true) // a typo or a removed field must not be ignored
+	if err := dec.Decode(&cfg); err != nil && !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("parse config: %w", err)
+	}
+	if err := cfg.loadUpstreamSecrets(); err != nil {
+		return nil, err
 	}
 
 	if cfg.Server.MaxMatches == 0 {
@@ -127,6 +147,52 @@ func Load(path string) (*Config, error) {
 	}
 
 	return &cfg, nil
+}
+
+// rejectSecretFields gives a clear error for secret fields that older configs
+// used. Secrets must come from the environment (password_env).
+func rejectSecretFields(data []byte) error {
+	var raw struct {
+		Upstream map[string]map[string]any `yaml:"upstream"`
+	}
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		return fmt.Errorf("parse config: %w", err)
+	}
+	for host, fields := range raw.Upstream {
+		for _, key := range []string{"token", "password"} {
+			if _, ok := fields[key]; ok {
+				return fmt.Errorf("upstream.%s.%s: secrets must not be in the config file; put the secret in an env var and set password_env to its name", host, key)
+			}
+		}
+	}
+	return nil
+}
+
+// loadUpstreamSecrets checks each upstream and reads its password from the environment.
+func (c *Config) loadUpstreamSecrets() error {
+	for host, upstream := range c.Upstream {
+		if upstream.BaseURL != "" {
+			u, err := url.Parse(upstream.BaseURL)
+			if err != nil {
+				return fmt.Errorf("upstream.%s.base_url: %w", host, err)
+			}
+			if u.User != nil {
+				return fmt.Errorf("upstream.%s.base_url must not contain credentials; use username and password_env", host)
+			}
+		}
+		if upstream.PasswordEnv == "" {
+			continue
+		}
+		if upstream.Username == "" {
+			return fmt.Errorf("upstream.%s: password_env needs username", host)
+		}
+		upstream.Password = os.Getenv(upstream.PasswordEnv)
+		if upstream.Password == "" {
+			return fmt.Errorf("upstream.%s: env var %s (password_env) is empty or not set", host, upstream.PasswordEnv)
+		}
+		c.Upstream[host] = upstream
+	}
+	return nil
 }
 
 func (s *ServerConfig) parseSizes() error {

@@ -12,6 +12,7 @@ import (
 )
 
 func TestLoadConfig(t *testing.T) {
+	t.Setenv("TEST_UPSTREAM_PASSWORD", "s3cret")
 	cfg, err := config.Load("../../testdata/config.yaml")
 	require.NoError(t, err)
 
@@ -20,7 +21,8 @@ func TestLoadConfig(t *testing.T) {
 	assert.Equal(t, 50, cfg.Server.MaxMatches)
 	assert.Equal(t, 30*time.Second, cfg.Server.GitTimeout)
 
-	assert.Equal(t, "ghp_test_token", cfg.Upstream["github.com"].Token)
+	assert.Equal(t, "git-mcp", cfg.Upstream["github.com"].Username)
+	assert.Equal(t, "s3cret", cfg.Upstream["github.com"].Password, "password is read from password_env")
 	assert.Equal(t, "git-mcp", cfg.Auth.Audience)
 	assert.Len(t, cfg.Auth.Issuers, 1)
 	assert.Equal(t, "https://oauth.example.com", cfg.Auth.Issuers[0].Iss)
@@ -33,13 +35,14 @@ func TestLoadConfig(t *testing.T) {
 }
 
 func TestLoadConfig_EnvExpansion(t *testing.T) {
-	t.Setenv("TEST_TOKEN", "expanded-token")
+	t.Setenv("TEST_BASE_URL", "https://git.example.test")
 	cfg, err := config.Load("../../testdata/config_env.yaml")
 	require.NoError(t, err)
-	assert.Equal(t, "expanded-token", cfg.Upstream["github.com"].Token)
+	assert.Equal(t, "https://git.example.test", cfg.Upstream["github.com"].BaseURL)
 }
 
 func TestServiceAllowsRepo(t *testing.T) {
+	t.Setenv("TEST_UPSTREAM_PASSWORD", "s3cret")
 	cfg, err := config.Load("../../testdata/config.yaml")
 	require.NoError(t, err)
 
@@ -54,41 +57,43 @@ func TestServiceAllowsRepo(t *testing.T) {
 
 func TestUpstreamURL(t *testing.T) {
 	cfg := &config.Config{Upstream: map[string]config.UpstreamConfig{
-		"github.com": {Token: "tok"},
+		"github.com": {Username: "u", Password: "p"},
 		"git.test":   {BaseURL: "http://gitserver:8080/"},
 	}}
 
 	tests := []struct {
-		name      string
-		repo      string
-		wantURL   string
-		wantToken string
-		wantErr   string
+		name     string
+		repo     string
+		wantURL  string
+		wantUser string
+		wantPass string
+		wantErr  string
 	}{
-		{"default https", "github.com/org/repo", "https://github.com/org/repo", "tok", ""},
-		{"base_url replaces host", "git.test/org/repo", "http://gitserver:8080/org/repo", "", ""},
-		{"unknown host", "gitlab.com/org/repo", "", "", `no upstream configured for host "gitlab.com"`},
+		{"default https", "github.com/org/repo", "https://github.com/org/repo", "u", "p", ""},
+		{"base_url replaces host", "git.test/org/repo", "http://gitserver:8080/org/repo", "", "", ""},
+		{"unknown host", "gitlab.com/org/repo", "", "", "", `no upstream configured for host "gitlab.com"`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			url, token, err := cfg.UpstreamURL(tt.repo)
+			url, user, pass, err := cfg.UpstreamURL(tt.repo)
 			if tt.wantErr != "" {
 				require.EqualError(t, err, tt.wantErr)
 				return
 			}
 			require.NoError(t, err)
 			assert.Equal(t, tt.wantURL, url)
-			assert.Equal(t, tt.wantToken, token)
+			assert.Equal(t, tt.wantUser, user)
+			assert.Equal(t, tt.wantPass, pass)
 		})
 	}
 }
 
 func TestInsecureUpstreams(t *testing.T) {
 	cfg := &config.Config{Upstream: map[string]config.UpstreamConfig{
-		"github.com": {Token: "tok"},
+		"github.com": {Username: "u", Password: "p"},
 		"plain.test": {BaseURL: "http://plain"},
-		"leaky.test": {BaseURL: "HTTP://leaky", Token: "tok"},
-		"tls.test":   {BaseURL: "https://tls", Token: "tok"},
+		"leaky.test": {BaseURL: "HTTP://leaky", Username: "u", Password: "p"},
+		"tls.test":   {BaseURL: "https://tls", Username: "u", Password: "p"},
 	}}
 	assert.Equal(t, []string{"leaky.test"}, cfg.InsecureUpstreams())
 }
@@ -141,6 +146,7 @@ func TestLoadConfig_SizeDefaultsAndParsing(t *testing.T) {
 	assert.Equal(t, 500*1024, cfg.Server.MaxDiffBytes)
 	assert.Equal(t, 1024*1024, cfg.Server.MaxOutputBytes)
 
+	t.Setenv("TEST_UPSTREAM_PASSWORD", "s3cret")
 	cfg, err = config.Load("../../testdata/config.yaml")
 	require.NoError(t, err)
 	assert.Equal(t, int64(1024*1024*1024), cfg.Server.MaxCacheBytes)
@@ -152,4 +158,60 @@ func TestLoadConfig_InvalidSize(t *testing.T) {
 	_, err := config.Load(path)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "max_cache_size")
+}
+
+func writeConfig(t *testing.T, body string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(body), 0o644))
+	return path
+}
+
+func TestLoadConfig_RejectsSecretsInFile(t *testing.T) {
+	tests := []struct {
+		name    string
+		body    string
+		wantErr string
+	}{
+		{"token field", "upstream:\n  github.com:\n    token: \"ghp_abc\"\n", "password_env"},
+		{"password field", "upstream:\n  github.com:\n    password: \"abc\"\n", "password_env"},
+		{"credentials in base_url", "upstream:\n  git.test:\n    base_url: \"https://u:p@git.test\"\n", "base_url must not contain credentials"},
+		{"username in base_url", "upstream:\n  git.test:\n    base_url: \"https://u@git.test\"\n", "base_url must not contain credentials"},
+		{"unknown field", "server:\n  listne: \"x\"\n", "listne"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := config.Load(writeConfig(t, tt.body))
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantErr)
+		})
+	}
+}
+
+func TestLoadConfig_PasswordEnv(t *testing.T) {
+	body := "upstream:\n  git.test:\n    username: \"bot\"\n    password_env: \"GIT_TEST_PW\"\n"
+
+	t.Run("reads the env var", func(t *testing.T) {
+		t.Setenv("GIT_TEST_PW", "s3cret")
+		cfg, err := config.Load(writeConfig(t, body))
+		require.NoError(t, err)
+		_, user, pass, err := cfg.UpstreamURL("git.test/org/repo")
+		require.NoError(t, err)
+		assert.Equal(t, "bot", user)
+		assert.Equal(t, "s3cret", pass)
+	})
+
+	t.Run("empty env var fails", func(t *testing.T) {
+		t.Setenv("GIT_TEST_PW", "")
+		_, err := config.Load(writeConfig(t, body))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "GIT_TEST_PW")
+	})
+
+	t.Run("password_env needs username", func(t *testing.T) {
+		t.Setenv("GIT_TEST_PW", "s3cret")
+		_, err := config.Load(writeConfig(t, "upstream:\n  git.test:\n    password_env: \"GIT_TEST_PW\"\n"))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "username")
+	})
 }

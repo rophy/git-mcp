@@ -361,3 +361,19 @@ func TestErrors_HaveStableCodes(t *testing.T) {
 		})
 	}
 }
+
+func TestUpstream_HTTPCredentials(t *testing.T) {
+	session := connect(t, "reader")
+
+	var ref tools.ResolveRefOutput
+	require.Empty(t, call(t, session, "resolve_ref", map[string]any{"repo": "private.test/org/repo", "ref": "main"}, &ref),
+		"clone with username and password_env")
+	assert.Len(t, ref.SHA, 40)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	res, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "resolve_ref", Arguments: map[string]any{"repo": "nocreds.test/org/repo", "ref": "main"}})
+	require.NoError(t, err)
+	require.True(t, res.IsError, "clone without credentials must fail")
+	assert.Equal(t, "upstream_error", res.Meta["error_code"])
+}

@@ -20,7 +20,7 @@ git-mcp provides a middle ground: a read-only git operations server that gives a
 | Auth model | Service-to-service | git-mcp authenticates services (not end users). Services handle their own user-level authorization. |
 | Auth protocol | JWT (OAuth 2.1 + SPIFFE compatible) | Both are standard JWTs. Issuers configured explicitly; identity is `(iss, sub)` pair. `aud` must equal `git-mcp`. |
 | Access control | Static YAML config | Maps service identity → allowed repos. Simple, sufficient for thousands of services. |
-| Upstream credentials | One read-only PAT per git host | git-mcp holds credentials. Access scoping happens in the YAML config, not at the credential level. |
+| Upstream credentials | One read-only username + password/token per git host, from the environment | git-mcp holds credentials. The config file names the env var (`password_env`) and never holds the secret. Git gets them through its standard credential helper protocol (HTTP Basic after a 401). Access scoping happens in the YAML config, not at the credential level. |
 | Transport | Streamable HTTP + stdio | HTTP for production (remote agents). stdio for local development (plug into Claude Code). |
 
 ## Architecture
@@ -49,7 +49,7 @@ git-mcp provides a middle ground: a read-only git operations server that gives a
 └─────────────────────────────────────────────┘
          │                          │
     local disk                 upstream git
-   (bare mirrors)          (GitHub/GitLab PAT)
+   (bare mirrors)          (HTTP credentials)
 ```
 
 Single Go binary with four internal layers:
@@ -214,12 +214,12 @@ Reviewed on 2026-10-11. No code change; revisit if the assumptions change.
 
 ```yaml
 upstream:
-  github.com:
-    token: "${GITHUB_PAT}"
-  gitlab.com:
-    token: "${GITLAB_TOKEN}"
-  git.internal.example:              # optional base_url replaces "https://<host>"
-    base_url: "http://gitserver:8080"   # http + token logs a startup warning
+  git.example.com: {}                   # public repos: no credentials
+  git.internal.example:
+    base_url: "http://gitserver:8080"   # optional; replaces "https://<host>"
+    username: "git-mcp"
+    password_env: "GIT_INTERNAL_TOKEN"  # env var NAME; http + password logs a startup warning
+# Rejected at load: token/password fields, credentials in base_url, unknown fields.
 
 auth:
   audience: "git-mcp"
@@ -236,14 +236,14 @@ services:
     issuer: "spire"
     subject: "spiffe://example.com/service/diagnostics"
     repos:
-      - "github.com/org/checkout-service"
-      - "github.com/org/payment-service"
+      - "git.example.com/org/checkout-service"
+      - "git.example.com/org/payment-service"
 
   sre-bot:
     issuer: "corp-oauth"
     subject: "sre-bot-client-id"
     repos:
-      - "github.com/org/*"
+      - "git.example.com/org/*"
 ```
 
 ### Auth Flow

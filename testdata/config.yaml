@@ -10,7 +10,8 @@ server:
 
 upstream:
   github.com:
-    token: "ghp_test_token"
+    username: "git-mcp"
+    password_env: "TEST_UPSTREAM_PASSWORD"
 
 auth:
   audience: "git-mcp"

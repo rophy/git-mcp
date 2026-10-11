@@ -7,6 +7,13 @@ server:
 upstream:
   git.test:
     base_url: "http://gitserver"
+  # Same repos behind HTTP Basic auth; the password comes from the environment.
+  private.test:
+    base_url: "http://gitserver/private"
+    username: "bot"
+    password_env: "E2E_UPSTREAM_PASSWORD"
+  nocreds.test:
+    base_url: "http://gitserver/private"
 
 auth:
   audience: "git-mcp"
@@ -19,7 +26,7 @@ services:
   reader:
     issuer: "e2e"
     subject: "reader"
-    repos: ["git.test/org/*"]
+    repos: ["git.test/org/*", "private.test/org/*", "nocreds.test/org/*"]
   narrow:
     issuer: "e2e"
     subject: "narrow"
