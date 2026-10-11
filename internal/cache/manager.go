@@ -17,9 +17,13 @@ import (
 
 type UpstreamResolver func(repo string) (url string, token string, err error)
 
-// trashDir holds evicted repos until they are deleted. Its name has no ".git"
-// suffix, so it never matches a repo path.
-const trashDir = ".trash"
+// trashDir holds evicted repos until they are deleted, and cloneDir holds
+// clones in progress. Their names have no ".git" suffix, so they never match a
+// repo path.
+const (
+	trashDir = ".trash"
+	cloneDir = ".tmp"
+)
 
 type repoState struct {
 	mu         sync.Mutex // serializes clone and fetch
@@ -49,8 +53,10 @@ func NewManager(cacheDir string, maxBytes int64, executor *git.Executor, resolve
 		resolve:  resolve,
 		repos:    map[string]*repoState{},
 	}
-	if err := os.RemoveAll(filepath.Join(cacheDir, trashDir)); err != nil {
-		return nil, err
+	for _, dir := range []string{trashDir, cloneDir} {
+		if err := os.RemoveAll(filepath.Join(cacheDir, dir)); err != nil {
+			return nil, err
+		}
 	}
 	if err := m.scan(); err != nil {
 		return nil, fmt.Errorf("scan cache dir: %w", err)
@@ -281,12 +287,26 @@ func (m *Manager) cloneRepo(ctx context.Context, repo, repoPath string) error {
 		return err
 	}
 
+	// Clone into a temp dir first, so a failed or killed clone never leaves a
+	// broken repo at repoPath.
+	tmpRoot := filepath.Join(m.cacheDir, cloneDir)
+	if err := os.MkdirAll(tmpRoot, 0o755); err != nil {
+		return err
+	}
+	tmp, err := os.MkdirTemp(tmpRoot, "clone-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tmp)
+
+	tmpRepo := filepath.Join(tmp, "repo")
+	if _, err := m.executor.RunWithEnv(ctx, ".", authEnv(token), "clone", "--bare", "--end-of-options", url, tmpRepo); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Dir(repoPath), 0o755); err != nil {
 		return err
 	}
-
-	_, err = m.executor.RunWithEnv(ctx, ".", authEnv(token), "clone", "--bare", "--end-of-options", url, repoPath)
-	return err
+	return os.Rename(tmpRepo, repoPath)
 }
 
 func (m *Manager) fetchRepo(ctx context.Context, repo, repoPath string) error {

@@ -4,9 +4,12 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -269,4 +272,40 @@ func TestEviction_ConcurrentUse(t *testing.T) {
 	for err := range errs {
 		t.Error(err)
 	}
+}
+
+func TestEnsure_KilledCloneLeavesNoBrokenRepo(t *testing.T) {
+	upstreamPath, expectedSHA := setupUpstreamRepo(t)
+	out, err := exec.Command("git", "-C", upstreamPath, "update-server-info").CombinedOutput()
+	require.NoError(t, err, "%s", out)
+
+	// Dumb HTTP upstream that serves refs but never sends objects.
+	files := http.FileServer(http.Dir(upstreamPath))
+	stalled := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/objects/") {
+			<-r.Context().Done()
+			return
+		}
+		files.ServeHTTP(w, r)
+	}))
+	defer stalled.Close()
+
+	cacheDir := t.TempDir()
+	upstreamURL := stalled.URL
+	mgr, err := cache.NewManager(cacheDir, 0, git.NewExecutor(time.Second), func(string) (string, string, error) {
+		return upstreamURL, "", nil
+	})
+	require.NoError(t, err)
+
+	_, _, err = mgr.Ensure(context.Background(), "h/o/a", "main", false)
+	require.Error(t, err, "clone must time out")
+	_, err = os.Stat(mgr.RepoPath("h/o/a"))
+	assert.True(t, os.IsNotExist(err), "killed clone left a directory at the repo path")
+
+	// Once the upstream works, the repo must clone normally.
+	upstreamURL = upstreamPath
+	sha, release, err := mgr.Ensure(context.Background(), "h/o/a", "main", false)
+	require.NoError(t, err)
+	defer release()
+	assert.Equal(t, expectedSHA, sha)
 }
