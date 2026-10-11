@@ -90,3 +90,11 @@ func TestInsecureUpstreams(t *testing.T) {
 	}}
 	assert.Equal(t, []string{"leaky.test"}, cfg.InsecureUpstreams())
 }
+
+func TestServiceAllowsRepo_RejectsUncleanPath(t *testing.T) {
+	wild := config.ServiceConfig{Repos: []string{"github.com/org/*"}}
+	assert.False(t, wild.AllowsRepo("github.com/org/x/../repo-b"))
+	assert.False(t, wild.AllowsRepo("github.com/org/./repo-b"))
+	assert.False(t, wild.AllowsRepo("github.com/org//repo-b"))
+	assert.True(t, wild.AllowsRepo("github.com/org/repo-b"))
+}

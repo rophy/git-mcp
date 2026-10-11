@@ -265,7 +265,7 @@ func TestValidation_RejectsMaliciousInput(t *testing.T) {
 		{"resolve_ref short hex", "resolve_ref",
 			map[string]any{"repo": repoA, "ref": "abc"}, "invalid length"},
 		{"repo traversal inside allowed org", "resolve_ref",
-			map[string]any{"repo": "git.test/org/x/../repo-b", "ref": "main"}, "repo contains invalid segment"},
+			map[string]any{"repo": "git.test/org/x/../repo-b", "ref": "main"}, "access denied"},
 		{"repo traversal to other org", "resolve_ref",
 			map[string]any{"repo": "git.test/org/../other/secret", "ref": "main"}, "access denied"},
 	}

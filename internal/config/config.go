@@ -78,6 +78,10 @@ type ServiceConfig struct {
 }
 
 func (s ServiceConfig) AllowsRepo(repo string) bool {
+	// path.Dir cleans its input, so "org/x/../repo" would match "org/*".
+	if path.Clean(repo) != repo {
+		return false
+	}
 	for _, pattern := range s.Repos {
 		if pattern == repo {
 			return true
