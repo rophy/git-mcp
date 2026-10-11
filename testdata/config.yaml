@@ -1,0 +1,32 @@
+server:
+  listen: "127.0.0.1:8080"
+  cache_dir: "/tmp/git-mcp-test/repos"
+  max_cache_size: "1GB"
+  max_file_size: "1MB"
+  max_matches: 50
+  max_diff_size: "500KB"
+  git_timeout: "30s"
+
+upstream:
+  github.com:
+    token: "ghp_test_token"
+
+auth:
+  audience: "git-mcp"
+  issuers:
+    - name: "test-oauth"
+      iss: "https://oauth.example.com"
+      jwks_uri: "https://oauth.example.com/.well-known/jwks.json"
+
+services:
+  test-service:
+    issuer: "test-oauth"
+    subject: "test-client-id"
+    repos:
+      - "github.com/org/repo-a"
+      - "github.com/org/repo-b"
+  wildcard-service:
+    issuer: "test-oauth"
+    subject: "wildcard-client-id"
+    repos:
+      - "github.com/org/*"
