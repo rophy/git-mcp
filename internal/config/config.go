@@ -14,7 +14,7 @@ type Config struct {
 	Server   ServerConfig              `yaml:"server"`
 	Upstream map[string]UpstreamConfig `yaml:"upstream"`
 	Auth     AuthConfig                `yaml:"auth"`
-	Services map[string]*ServiceConfig `yaml:"services"`
+	Services map[string]ServiceConfig  `yaml:"services"`
 }
 
 type ServerConfig struct {
@@ -39,7 +39,7 @@ type AuthConfig struct {
 type IssuerConfig struct {
 	Name    string `yaml:"name"`
 	Iss     string `yaml:"iss"`
-	JWKSUri string `yaml:"jwks_uri"`
+	JWKSURI string `yaml:"jwks_uri"`
 }
 
 type ServiceConfig struct {
@@ -48,7 +48,7 @@ type ServiceConfig struct {
 	Repos   []string `yaml:"repos"`
 }
 
-func (s *ServiceConfig) AllowsRepo(repo string) bool {
+func (s ServiceConfig) AllowsRepo(repo string) bool {
 	for _, pattern := range s.Repos {
 		if pattern == repo {
 			return true

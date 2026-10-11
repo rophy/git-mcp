@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"strings"
 
+	"github.com/rophy/git-mcp/internal/auth"
 	"github.com/rophy/git-mcp/internal/cache"
 	"github.com/rophy/git-mcp/internal/config"
 	"github.com/rophy/git-mcp/internal/git"
@@ -74,7 +75,15 @@ func main() {
 	if listen == "" {
 		listen = "0.0.0.0:8080"
 	}
-	if err := server.RunHTTP(ctx, srv, listen, logger); err != nil {
+	var authenticator *auth.Authenticator
+	if len(cfg.Auth.Issuers) > 0 {
+		authenticator, err = auth.NewAuthenticator(cfg)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error initializing auth: %v\n", err)
+			os.Exit(1)
+		}
+	}
+	if err := server.RunHTTP(ctx, srv, listen, authenticator, logger); err != nil {
 		logger.Error("http server error", "err", err)
 		os.Exit(1)
 	}

@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/rophy/git-mcp/internal/audit"
+	"github.com/rophy/git-mcp/internal/auth"
 	"github.com/rophy/git-mcp/internal/cache"
 	"github.com/rophy/git-mcp/internal/config"
 	"github.com/rophy/git-mcp/internal/git"
@@ -56,7 +58,7 @@ func RunStdio(ctx context.Context, srv *mcp.Server) error {
 	return srv.Run(ctx, &mcp.StdioTransport{})
 }
 
-func RunHTTP(ctx context.Context, srv *mcp.Server, listen string, logger *slog.Logger) error {
+func RunHTTP(ctx context.Context, srv *mcp.Server, listen string, authenticator *auth.Authenticator, logger *slog.Logger) error {
 	handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return srv }, nil)
 
 	mux := http.NewServeMux()
@@ -66,7 +68,13 @@ func RunHTTP(ctx context.Context, srv *mcp.Server, listen string, logger *slog.L
 		fmt.Fprint(w, `{"status":"ok"}`)
 	})
 
-	httpSrv := &http.Server{Addr: listen, Handler: mux}
+	var h http.Handler = mux
+	if authenticator != nil {
+		h = auth.HTTPMiddleware(authenticator)(h)
+	}
+	h = audit.Middleware(h)
+
+	httpSrv := &http.Server{Addr: listen, Handler: h}
 	go func() {
 		<-ctx.Done()
 		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
