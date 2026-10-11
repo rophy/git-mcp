@@ -47,6 +47,8 @@ func setupTestRepo(t *testing.T) (cacheManager *cache.Manager, repo string, head
 	require.NoError(t, os.MkdirAll(filepath.Join(workDir, "docs"), 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(workDir, "docs/utf8.txt"), []byte(strings.Repeat("é", 100)+"\n"), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(workDir, specialName), []byte("special\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(workDir, "docs/blank.txt"), []byte("a\n\n\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(workDir, "docs/no-eol.txt"), []byte("x\ny"), 0o644))
 	run("git", "add", ".")
 	run("git", "-c", "commit.gpgsign=false", "commit", "-m", "initial commit")
 	sha := run("git", "rev-parse", "HEAD")
@@ -273,4 +275,28 @@ func TestSearchCode_SpecialCharacters(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Equal(t, []tools.SearchMatch{{Path: specialName, LineNumber: 1, LineText: "special"}}, result.Matches)
+}
+
+func TestReadFile_KeepsTrailingBlankLines(t *testing.T) {
+	mgr, repo, _ := setupTestRepo(t)
+	executor := git.NewExecutor(30 * time.Second)
+	handler := tools.NewReadFile(mgr, executor, 1024*1024)
+
+	result, err := handler.Execute(context.Background(), tools.ReadFileInput{
+		Repo: repo, Ref: "main", Path: "docs/blank.txt",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "1\ta\n2\t\n3\t\n", result.Content)
+}
+
+func TestReadFile_NoTrailingNewline(t *testing.T) {
+	mgr, repo, _ := setupTestRepo(t)
+	executor := git.NewExecutor(30 * time.Second)
+	handler := tools.NewReadFile(mgr, executor, 1024*1024)
+
+	result, err := handler.Execute(context.Background(), tools.ReadFileInput{
+		Repo: repo, Ref: "main", Path: "docs/no-eol.txt",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "1\tx\n2\ty\n", result.Content)
 }

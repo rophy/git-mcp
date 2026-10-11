@@ -24,11 +24,12 @@ func (e *Executor) Run(ctx context.Context, repoPath string, args ...string) (st
 
 func (e *Executor) RunWithEnv(ctx context.Context, repoPath string, extraEnv []string, args ...string) (string, error) {
 	out, _, err := e.run(ctx, repoPath, extraEnv, 0, args...)
-	return out, err
+	return strings.TrimRight(out, "\n"), err
 }
 
-// RunLimited runs git and keeps at most maxBytes of stdout. When the output is
-// larger, git is stopped and the first maxBytes are returned with truncated=true.
+// RunLimited runs git and keeps at most maxBytes of stdout, unchanged. When the
+// output is larger, git is stopped and the first maxBytes are returned with
+// truncated=true.
 func (e *Executor) RunLimited(ctx context.Context, repoPath string, maxBytes int, args ...string) (string, bool, error) {
 	return e.run(ctx, repoPath, nil, maxBytes, args...)
 }
@@ -56,10 +57,7 @@ func (e *Executor) run(ctx context.Context, repoPath string, extraEnv []string, 
 		return "", false, fmt.Errorf("git %s: %s: %w", strings.Join(args, " "), stderr.String(), err)
 	}
 
-	if stdout.exceeded {
-		return stdout.buf.String(), true, nil
-	}
-	return strings.TrimRight(stdout.buf.String(), "\n"), false, nil
+	return stdout.buf.String(), stdout.exceeded, nil
 }
 
 // limitWriter buffers up to limit bytes (no limit when limit <= 0) and calls

@@ -77,7 +77,8 @@ func TestExecutorRunLimited_UnderLimit(t *testing.T) {
 	out, truncated, err := exec.RunLimited(context.Background(), repoDir, 100, "rev-parse", "--verify", "HEAD")
 	require.NoError(t, err)
 	assert.False(t, truncated)
-	assert.Len(t, out, 40)
+	assert.Len(t, out, 41, "output is not trimmed")
+	assert.True(t, strings.HasSuffix(out, "\n"))
 }
 
 func TestExecutorRunLimited_OverLimit(t *testing.T) {

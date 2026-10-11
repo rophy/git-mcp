@@ -63,7 +63,8 @@ func (h *ReadFile) Execute(ctx context.Context, input ReadFileInput) (*ReadFileO
 		return nil, fmt.Errorf("file exceeds max size (%d bytes)", h.maxFileSize)
 	}
 
-	lines := strings.Split(content, "\n")
+	// A final newline ends the last line; it does not start a new one.
+	lines := strings.Split(strings.TrimSuffix(content, "\n"), "\n")
 	start := 1
 	end := len(lines)
 	if input.StartLine != nil {
