@@ -175,5 +175,3 @@ func blameDate(unix int64, tz string) string {
 	}
 	return t.Format(time.RFC3339)
 }
-
-func (i *GitBlameInput) GetRepo() string { return i.Repo }

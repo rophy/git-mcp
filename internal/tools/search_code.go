@@ -128,5 +128,3 @@ func parseGrep(out, revPrefix string, truncated bool) []SearchMatch {
 	}
 	return matches
 }
-
-func (i *SearchCodeInput) GetRepo() string { return i.Repo }

@@ -3,14 +3,23 @@ package server_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"log/slog"
 	"net"
+	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/rophy/git-mcp/internal/auth"
+	"github.com/rophy/git-mcp/internal/cache"
 	"github.com/rophy/git-mcp/internal/config"
+	"github.com/rophy/git-mcp/internal/git"
 	"github.com/rophy/git-mcp/internal/server"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -105,4 +114,163 @@ func TestServeHTTP_WaitsForInFlightRequests(t *testing.T) {
 	require.NoError(t, <-served)
 	assert.True(t, finished.Load(), "ServeHTTP returned before the in-flight request finished")
 	assert.NoError(t, <-called)
+}
+
+// newTestServer returns a server backed by a local one-commit repo, the repo
+// name, its HEAD SHA, and the buffer that receives JSON logs.
+func newTestServer(t *testing.T, authenticator *auth.Authenticator) (*mcp.Server, string, string, *bytes.Buffer) {
+	t.Helper()
+	dir := t.TempDir()
+	work := filepath.Join(dir, "work")
+	run := func(args ...string) string {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = work
+		cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1",
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+		out, err := cmd.CombinedOutput()
+		require.NoError(t, err, "%v: %s", args, out)
+		return strings.TrimSpace(string(out))
+	}
+	require.NoError(t, os.MkdirAll(work, 0o755))
+	run("init", "-q", "-b", "main")
+	require.NoError(t, os.WriteFile(filepath.Join(work, "a.txt"), []byte("a\n"), 0o644))
+	run("add", ".")
+	run("commit", "-q", "-m", "init")
+	sha := run("rev-parse", "HEAD")
+
+	executor := git.NewExecutor(30 * time.Second)
+	mgr, err := cache.NewManager(filepath.Join(dir, "cache"), 0, executor, func(string) (string, string, error) {
+		return work, "", nil
+	})
+	require.NoError(t, err)
+
+	logs := &bytes.Buffer{}
+	logger := slog.New(slog.NewJSONHandler(logs, nil))
+	return server.New(&config.Config{}, mgr, executor, authenticator, logger), "h/o/repo", sha, logs
+}
+
+func connectInMemory(t *testing.T, srv *mcp.Server) *mcp.ClientSession {
+	t.Helper()
+	serverTransport, clientTransport := mcp.NewInMemoryTransports()
+	_, err := srv.Connect(t.Context(), serverTransport, nil)
+	require.NoError(t, err)
+	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "test"}, nil)
+	session, err := client.Connect(t.Context(), clientTransport, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { session.Close() })
+	return session
+}
+
+// auditLines returns the "tool_call" records written to logs.
+func auditLines(t *testing.T, logs *bytes.Buffer) []map[string]any {
+	t.Helper()
+	var records []map[string]any
+	for _, line := range strings.Split(strings.TrimSpace(logs.String()), "\n") {
+		var record map[string]any
+		if json.Unmarshal([]byte(line), &record) == nil && record["msg"] == "tool_call" {
+			records = append(records, record)
+		}
+	}
+	return records
+}
+
+func TestAudit_LogsEachToolCall(t *testing.T) {
+	srv, repo, sha, logs := newTestServer(t, nil)
+	session := connectInMemory(t, srv)
+
+	res, err := session.CallTool(t.Context(), &mcp.CallToolParams{Name: "resolve_ref", Arguments: map[string]any{"repo": repo, "ref": "main"}})
+	require.NoError(t, err)
+	require.False(t, res.IsError)
+	res, err = session.CallTool(t.Context(), &mcp.CallToolParams{Name: "read_file", Arguments: map[string]any{"repo": repo, "ref": "main", "path": "../x"}})
+	require.NoError(t, err)
+	require.True(t, res.IsError)
+
+	records := auditLines(t, logs)
+	require.Len(t, records, 2)
+
+	ok := records[0]
+	assert.Equal(t, "resolve_ref", ok["tool"])
+	assert.Equal(t, repo, ok["repo"])
+	assert.Equal(t, "main", ok["ref"])
+	assert.Equal(t, sha, ok["resolved_sha"])
+	assert.Contains(t, ok, "duration_ms")
+	assert.NotContains(t, ok, "error")
+
+	failed := records[1]
+	assert.Equal(t, "read_file", failed["tool"])
+	assert.Equal(t, "../x", failed["path"])
+	assert.Contains(t, failed["error"], "path contains '..'")
+}
+
+type headerTransport struct{ key, value string }
+
+func (h headerTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	r = r.Clone(r.Context())
+	r.Header.Set(h.key, h.value)
+	return http.DefaultTransport.RoundTrip(r)
+}
+
+func TestAudit_LogsRequestIDFromHTTPHeader(t *testing.T) {
+	srv, repo, _, logs := newTestServer(t, nil)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go server.ServeHTTP(ctx, srv, ln, nil, slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)))
+
+	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "test"}, nil)
+	session, err := client.Connect(t.Context(), &mcp.StreamableClientTransport{
+		Endpoint:   "http://" + ln.Addr().String() + "/mcp",
+		HTTPClient: &http.Client{Transport: headerTransport{"X-Request-Id", "req-123"}},
+	}, nil)
+	require.NoError(t, err)
+	defer session.Close()
+
+	_, err = session.CallTool(t.Context(), &mcp.CallToolParams{Name: "resolve_ref", Arguments: map[string]any{"repo": repo, "ref": "main"}})
+	require.NoError(t, err)
+
+	records := auditLines(t, logs)
+	require.Len(t, records, 1)
+	assert.Equal(t, "req-123", records[0]["request_id"])
+}
+
+func TestAccess_FailsClosedWithoutService(t *testing.T) {
+	authenticator, err := auth.NewAuthenticator(t.Context(), &config.Config{Auth: config.AuthConfig{
+		Audience: "git-mcp",
+		Issuers:  []config.IssuerConfig{{Name: "i", Iss: "https://issuer.test", JWKSURI: "http://127.0.0.1:1/jwks.json"}},
+	}})
+	require.NoError(t, err)
+	srv, repo, _, logs := newTestServer(t, authenticator)
+	session := connectInMemory(t, srv)
+
+	// No HTTP auth middleware ran, so the context has no service.
+	res, err := session.CallTool(t.Context(), &mcp.CallToolParams{Name: "resolve_ref", Arguments: map[string]any{"repo": repo, "ref": "main"}})
+	require.NoError(t, err)
+	assert.True(t, res.IsError, "call without an authenticated service must be denied")
+
+	records := auditLines(t, logs)
+	require.Len(t, records, 1)
+	assert.Contains(t, records[0]["error"], "access denied")
+}
+
+func TestServeHTTP_ShutdownWithIdleNewConnection(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
+	srv := mcp.NewServer(&mcp.Implementation{Name: "test", Version: "test"}, nil)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(context.Background())
+	served := make(chan error, 1)
+	go func() { served <- server.ServeHTTP(ctx, srv, ln, nil, logger) }()
+
+	// A connection that never sends a request, e.g. a client's spare dial.
+	conn, err := net.Dial("tcp", ln.Addr().String())
+	require.NoError(t, err)
+	defer conn.Close()
+	time.Sleep(100 * time.Millisecond)
+
+	start := time.Now()
+	cancel()
+	err = <-served
+	assert.NoError(t, err)
+	assert.Less(t, time.Since(start), time.Second, "shutdown must not wait for connections that sent no request")
 }

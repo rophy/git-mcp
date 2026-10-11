@@ -80,5 +80,3 @@ func (h *GitDiff) Execute(ctx context.Context, input GitDiffInput) (*GitDiffOutp
 
 	return &GitDiffOutput{BaseSHA: baseSHA, HeadSHA: headSHA, Diff: diff, Truncated: truncated}, nil
 }
-
-func (i *GitDiffInput) GetRepo() string { return i.Repo }

@@ -98,5 +98,3 @@ func (h *GitLog) Execute(ctx context.Context, input GitLogInput) (*GitLogOutput,
 
 	return &GitLogOutput{SHA: sha, Commits: commits, Truncated: truncated}, nil
 }
-
-func (i *GitLogInput) GetRepo() string { return i.Repo }
