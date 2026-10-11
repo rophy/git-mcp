@@ -42,6 +42,7 @@ func (e *Executor) run(ctx context.Context, repoPath string, extraEnv []string, 
 
 	cmd := exec.CommandContext(runCtx, "git", args...)
 	cmd.WaitDelay = 2 * time.Second
+	killProcessGroup(cmd)
 	cmd.Dir = repoPath
 	cmd.Env = append(sanitizeEnv(), extraEnv...)
 
