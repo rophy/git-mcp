@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"time"
 
@@ -77,7 +78,19 @@ func RunStdio(ctx context.Context, srv *mcp.Server) error {
 }
 
 func RunHTTP(ctx context.Context, srv *mcp.Server, listen string, authenticator *auth.Authenticator, logger *slog.Logger) error {
-	handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return srv }, nil)
+	ln, err := net.Listen("tcp", listen)
+	if err != nil {
+		return err
+	}
+	return ServeHTTP(ctx, srv, ln, authenticator, logger)
+}
+
+// ServeHTTP serves MCP over HTTP on ln until ctx is done.
+func ServeHTTP(ctx context.Context, srv *mcp.Server, ln net.Listener, authenticator *auth.Authenticator, logger *slog.Logger) error {
+	// Stateless (see design spec): no server-side sessions and no long-lived
+	// GET streams, so shutdown only waits for in-flight tool calls.
+	handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return srv },
+		&mcp.StreamableHTTPOptions{Stateless: true})
 
 	mux := http.NewServeMux()
 	mux.Handle("/mcp", handler)
@@ -94,16 +107,18 @@ func RunHTTP(ctx context.Context, srv *mcp.Server, listen string, authenticator 
 	}
 	h = audit.Middleware(h)
 
-	httpSrv := &http.Server{Addr: listen, Handler: h, ReadHeaderTimeout: 10 * time.Second}
+	httpSrv := &http.Server{Handler: h, ReadHeaderTimeout: 10 * time.Second}
+	shutdownDone := make(chan error, 1)
 	go func() {
 		<-ctx.Done()
 		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		httpSrv.Shutdown(shutCtx)
+		shutdownDone <- httpSrv.Shutdown(shutCtx)
 	}()
-	logger.Info("starting HTTP server", "listen", listen)
-	if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	logger.Info("starting HTTP server", "listen", ln.Addr().String())
+	if err := httpSrv.Serve(ln); !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
-	return nil
+	// Serve returns as soon as Shutdown starts; wait for in-flight requests.
+	return <-shutdownDone
 }

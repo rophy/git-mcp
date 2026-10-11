@@ -4,7 +4,10 @@ import (
 	"bytes"
 	"context"
 	"log/slog"
+	"net"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rophy/git-mcp/internal/config"
@@ -63,4 +66,41 @@ func TestNew_ToolSchemasRequireOnlyMandatoryInputs(t *testing.T) {
 		"git_log":     {"repo", "ref"},
 		"git_show":    {"repo", "ref", "commit"},
 	}, got)
+}
+
+func TestServeHTTP_WaitsForInFlightRequests(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
+	started := make(chan struct{})
+	var finished atomic.Bool
+
+	srv := mcp.NewServer(&mcp.Implementation{Name: "test", Version: "test"}, nil)
+	mcp.AddTool(srv, &mcp.Tool{Name: "slow"}, func(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, struct{}, error) {
+		close(started)
+		time.Sleep(500 * time.Millisecond)
+		finished.Store(true)
+		return &mcp.CallToolResult{}, struct{}{}, nil
+	})
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(context.Background())
+	served := make(chan error, 1)
+	go func() { served <- server.ServeHTTP(ctx, srv, ln, nil, logger) }()
+
+	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "test"}, nil)
+	session, err := client.Connect(t.Context(), &mcp.StreamableClientTransport{Endpoint: "http://" + ln.Addr().String() + "/mcp"}, nil)
+	require.NoError(t, err)
+	defer session.Close()
+
+	called := make(chan error, 1)
+	go func() {
+		_, err := session.CallTool(t.Context(), &mcp.CallToolParams{Name: "slow"})
+		called <- err
+	}()
+
+	<-started
+	cancel()
+	require.NoError(t, <-served)
+	assert.True(t, finished.Load(), "ServeHTTP returned before the in-flight request finished")
+	assert.NoError(t, <-called)
 }
