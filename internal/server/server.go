@@ -70,7 +70,7 @@ func RunHTTP(ctx context.Context, srv *mcp.Server, listen string, authenticator 
 
 	var h http.Handler = mux
 	if authenticator != nil {
-		h = auth.HTTPMiddleware(authenticator)(h)
+		h = auth.HTTPMiddleware(authenticator, logger)(h)
 	}
 	h = audit.Middleware(h)
 

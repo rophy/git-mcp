@@ -1,13 +1,14 @@
 package auth
 
 import (
+	"log/slog"
 	"net/http"
 	"strings"
 
 	"github.com/rophy/git-mcp/internal/audit"
 )
 
-func HTTPMiddleware(authenticator *Authenticator) func(http.Handler) http.Handler {
+func HTTPMiddleware(authenticator *Authenticator, logger *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path == "/health" {
@@ -29,6 +30,7 @@ func HTTPMiddleware(authenticator *Authenticator) func(http.Handler) http.Handle
 
 			identity, err := authenticator.Authenticate(token)
 			if err != nil {
+				logger.Warn("authentication failed", "err", err, "remote", r.RemoteAddr)
 				http.Error(w, `{"error":"authentication failed"}`, http.StatusUnauthorized)
 				return
 			}

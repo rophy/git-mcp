@@ -2,8 +2,8 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	gojwt "github.com/golang-jwt/jwt/v5"
@@ -98,7 +98,7 @@ func (a *Authenticator) Authenticate(tokenString string) (*Identity, error) {
 		gojwt.WithValidMethods([]string{"RS256", "RS384", "RS512", "ES256", "ES384", "ES512", "PS256", "PS384", "PS512"}),
 	)
 	if err != nil {
-		if strings.Contains(err.Error(), "token is expired") {
+		if errors.Is(err, gojwt.ErrTokenExpired) {
 			return nil, fmt.Errorf("token expired: %w", err)
 		}
 		return nil, fmt.Errorf("validate token: %w", err)
