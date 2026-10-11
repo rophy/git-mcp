@@ -23,6 +23,7 @@ func (e *Executor) Run(ctx context.Context, repoPath string, args ...string) (st
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.WaitDelay = 2 * time.Second
 	cmd.Dir = repoPath
 	cmd.Env = sanitizeEnv()
 
@@ -52,6 +53,15 @@ func sanitizeEnv() []string {
 		"GIT_SSH_COMMAND":                  true,
 		"GIT_CONFIG_GLOBAL":                true,
 		"GIT_CONFIG_SYSTEM":                true,
+		"GIT_CONFIG_NOSYSTEM":              true,
+		"GIT_CONFIG":                       true,
+		"GIT_EXEC_PATH":                    true,
+		"GIT_PAGER":                        true,
+		"GIT_EXTERNAL_DIFF":                true,
+		"GIT_PROXY_COMMAND":                true,
+		"GIT_CONFIG_COUNT":                 true,
+		"GIT_CONFIG_PARAMETERS":            true,
+		"GIT_NAMESPACE":                    true,
 	}
 
 	var env []string
@@ -61,6 +71,6 @@ func sanitizeEnv() []string {
 			env = append(env, e)
 		}
 	}
-	env = append(env, "GIT_TERMINAL_PROMPT=0")
+	env = append(env, "GIT_TERMINAL_PROMPT=0", "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null")
 	return env
 }
