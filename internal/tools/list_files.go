@@ -57,7 +57,7 @@ func (h *ListFiles) Execute(ctx context.Context, input ListFilesInput) (*ListFil
 	defer release()
 
 	repoPath := h.cache.RepoPath(input.Repo)
-	args := []string{"ls-tree"}
+	args := []string{"ls-tree", "-z"}
 	if input.Recursive {
 		args = append(args, "-r")
 	}
@@ -73,7 +73,8 @@ func (h *ListFiles) Execute(ctx context.Context, input ListFilesInput) (*ListFil
 	}
 
 	entries := []FileEntry{}
-	for _, line := range strings.Split(completeLines(out, truncated), "\n") {
+	// -z: records end with NUL and paths are not quoted.
+	for _, line := range strings.Split(completeRecords(out, truncated, 0), "\x00") {
 		if line == "" {
 			continue
 		}

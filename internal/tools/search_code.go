@@ -70,7 +70,7 @@ func (h *SearchCode) Execute(ctx context.Context, input SearchCodeInput) (*Searc
 	}
 
 	repoPath := h.cache.RepoPath(input.Repo)
-	args := []string{"grep", "-n", "-E", fmt.Sprintf("-m%d", limit+1), "-e", input.Pattern, sha}
+	args := []string{"grep", "-z", "-n", "-E", fmt.Sprintf("-m%d", limit+1), "-e", input.Pattern, sha}
 	if input.Path != "" {
 		args = append(args, "--", input.Path)
 	}
@@ -83,32 +83,46 @@ func (h *SearchCode) Execute(ctx context.Context, input SearchCodeInput) (*Searc
 		return nil, err
 	}
 
-	lines := strings.Split(completeLines(out, outTruncated), "\n")
+	matches := parseGrep(out, sha+":", outTruncated)
 	truncated := outTruncated
-	if len(lines) > limit {
-		lines = lines[:limit]
+	if len(matches) > limit {
+		matches = matches[:limit]
 		truncated = true
 	}
 
-	matches := make([]SearchMatch, 0, len(lines))
-	for _, line := range lines {
-		if line == "" {
+	return &SearchCodeOutput{SHA: sha, Matches: matches, Truncated: truncated}, nil
+}
+
+// parseGrep parses "git grep -z -n" output: "<rev>:<path>\0<line>\0<text>\n".
+// With -z, paths are not quoted and may contain ':'. When truncated, the
+// partial last record is dropped.
+func parseGrep(out, revPrefix string, truncated bool) []SearchMatch {
+	matches := []SearchMatch{}
+	for out != "" {
+		path, rest, ok := strings.Cut(out, "\x00")
+		if !ok {
+			break
+		}
+		num, rest, ok := strings.Cut(rest, "\x00")
+		if !ok {
+			break
+		}
+		text, rest, ok := strings.Cut(rest, "\n")
+		if !ok && truncated {
+			break
+		}
+		out = rest
+		lineNum, err := strconv.Atoi(num)
+		if err != nil {
 			continue
 		}
-		after := strings.TrimPrefix(line, sha+":")
-		parts := strings.SplitN(after, ":", 3)
-		if len(parts) < 3 {
-			continue
-		}
-		lineNum, _ := strconv.Atoi(parts[1])
 		matches = append(matches, SearchMatch{
-			Path:       parts[0],
+			Path:       strings.TrimPrefix(path, revPrefix),
 			LineNumber: lineNum,
-			LineText:   parts[2],
+			LineText:   text,
 		})
 	}
-
-	return &SearchCodeOutput{SHA: sha, Matches: matches, Truncated: truncated}, nil
+	return matches
 }
 
 func (i *SearchCodeInput) GetRepo() string { return i.Repo }

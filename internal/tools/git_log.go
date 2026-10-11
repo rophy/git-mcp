@@ -80,7 +80,7 @@ func (h *GitLog) Execute(ctx context.Context, input GitLogInput) (*GitLogOutput,
 	}
 
 	commits := []LogEntry{}
-	for _, record := range strings.Split(completeLines(out, truncated), "\n") {
+	for _, record := range strings.Split(completeRecords(out, truncated, '\n'), "\n") {
 		if record == "" {
 			continue
 		}

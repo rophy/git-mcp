@@ -5,12 +5,13 @@ import (
 	"unicode/utf8"
 )
 
-// completeLines drops the partial last line of output that was truncated.
-func completeLines(out string, truncated bool) string {
+// completeRecords drops the partial last record of output that was truncated.
+// Records end with sep.
+func completeRecords(out string, truncated bool, sep byte) string {
 	if !truncated {
 		return out
 	}
-	if i := strings.LastIndexByte(out, '\n'); i >= 0 {
+	if i := strings.LastIndexByte(out, sep); i >= 0 {
 		return out[:i]
 	}
 	return ""

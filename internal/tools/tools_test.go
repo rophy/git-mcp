@@ -17,6 +17,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// specialName is a path that git quotes unless -z is used. It also has a ':'.
+const specialName = "docs/héllo \"q\":x.txt"
+
 func setupTestRepo(t *testing.T) (cacheManager *cache.Manager, repo string, headSHA string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -43,6 +46,7 @@ func setupTestRepo(t *testing.T) (cacheManager *cache.Manager, repo string, head
 	require.NoError(t, os.WriteFile(filepath.Join(workDir, "README.md"), []byte("# Test\n"), 0o644))
 	require.NoError(t, os.MkdirAll(filepath.Join(workDir, "docs"), 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(workDir, "docs/utf8.txt"), []byte(strings.Repeat("é", 100)+"\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(workDir, specialName), []byte("special\n"), 0o644))
 	run("git", "add", ".")
 	run("git", "-c", "commit.gpgsign=false", "commit", "-m", "initial commit")
 	sha := run("git", "rev-parse", "HEAD")
@@ -245,4 +249,28 @@ func TestGitLog_OutputLimit(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, result.Truncated)
 	assert.Empty(t, result.Commits)
+}
+
+func TestListFiles_SpecialCharacters(t *testing.T) {
+	mgr, repo, _ := setupTestRepo(t)
+	executor := git.NewExecutor(30 * time.Second)
+	handler := tools.NewListFiles(mgr, executor, 1024*1024)
+
+	result, err := handler.Execute(context.Background(), tools.ListFilesInput{
+		Repo: repo, Ref: "main", Recursive: true,
+	})
+	require.NoError(t, err)
+	assert.Contains(t, result.Entries, tools.FileEntry{Name: specialName, Type: "file"})
+}
+
+func TestSearchCode_SpecialCharacters(t *testing.T) {
+	mgr, repo, _ := setupTestRepo(t)
+	executor := git.NewExecutor(30 * time.Second)
+	handler := tools.NewSearchCode(mgr, executor, 50, 1024*1024)
+
+	result, err := handler.Execute(context.Background(), tools.SearchCodeInput{
+		Repo: repo, Ref: "main", Pattern: "special",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, []tools.SearchMatch{{Path: specialName, LineNumber: 1, LineText: "special"}}, result.Matches)
 }
