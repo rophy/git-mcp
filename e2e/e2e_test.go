@@ -232,3 +232,51 @@ func TestAccess_EnforcesServiceRepos(t *testing.T) {
 		})
 	}
 }
+
+func TestValidation_RejectsMaliciousInput(t *testing.T) {
+	session := connect(t, "reader")
+
+	tests := []struct {
+		name    string
+		tool    string
+		args    map[string]any
+		wantErr string
+	}{
+		{"read_file path traversal", "read_file",
+			map[string]any{"repo": repoA, "ref": "main", "path": "../../../etc/passwd"}, "path contains '..'"},
+		{"read_file absolute path", "read_file",
+			map[string]any{"repo": repoA, "ref": "main", "path": "/etc/passwd"}, "path is absolute"},
+		{"read_file .git dir", "read_file",
+			map[string]any{"repo": repoA, "ref": "main", "path": ".git/config"}, "path accesses .git"},
+		{"list_files traversal", "list_files",
+			map[string]any{"repo": repoA, "ref": "main", "path": "pkg/../.."}, "path contains '..'"},
+		{"search_code option pattern", "search_code",
+			map[string]any{"repo": repoA, "ref": "main", "pattern": "--open-files-in-pager=sh"}, "pattern must not start with -"},
+		{"search_code option path", "search_code",
+			map[string]any{"repo": repoA, "ref": "main", "pattern": "x", "path": "--output=/tmp/x"}, "path must not start with -"},
+		{"git_log option ref", "git_log",
+			map[string]any{"repo": repoA, "ref": "--output=/tmp/x"}, "ref contains invalid characters"},
+		{"git_show option commit", "git_show",
+			map[string]any{"repo": repoA, "ref": "main", "commit": "--output=/tmp/x"}, "ref contains invalid characters"},
+		{"git_show reflog syntax", "git_show",
+			map[string]any{"repo": repoA, "ref": "main", "commit": "main@{0}"}, "ref contains invalid characters"},
+		{"resolve_ref range", "resolve_ref",
+			map[string]any{"repo": repoA, "ref": "main..v1.0.0"}, "ref contains '..'"},
+		{"resolve_ref short hex", "resolve_ref",
+			map[string]any{"repo": repoA, "ref": "abc"}, "invalid length"},
+		{"repo traversal inside allowed org", "resolve_ref",
+			map[string]any{"repo": "git.test/org/x/../repo-b", "ref": "main"}, "repo contains invalid segment"},
+		{"repo traversal to other org", "resolve_ref",
+			map[string]any{"repo": "git.test/org/../other/secret", "ref": "main"}, "access denied"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Contains(t, call(t, session, tt.tool, tt.args, nil), tt.wantErr)
+		})
+	}
+
+	// The server must still work after the rejected calls.
+	var ref tools.ResolveRefOutput
+	require.Empty(t, call(t, session, "resolve_ref", map[string]any{"repo": repoA, "ref": "main"}, &ref))
+	assert.Len(t, ref.SHA, 40)
+}
