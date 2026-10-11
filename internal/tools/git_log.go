@@ -61,10 +61,11 @@ func (h *GitLog) Execute(ctx context.Context, input GitLogInput) (*GitLogOutput,
 		count = 100
 	}
 
-	sha, err := h.cache.Ensure(ctx, input.Repo, input.Ref, false)
+	sha, release, err := h.cache.Ensure(ctx, input.Repo, input.Ref, false)
 	if err != nil {
 		return nil, err
 	}
+	defer release()
 
 	repoPath := h.cache.RepoPath(input.Repo)
 	format := "%H%x00%an <%ae>%x00%aI%x00%s%x00"

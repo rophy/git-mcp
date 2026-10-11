@@ -50,10 +50,11 @@ func (h *ListFiles) Execute(ctx context.Context, input ListFilesInput) (*ListFil
 		}
 	}
 
-	sha, err := h.cache.Ensure(ctx, input.Repo, input.Ref, false)
+	sha, release, err := h.cache.Ensure(ctx, input.Repo, input.Ref, false)
 	if err != nil {
 		return nil, err
 	}
+	defer release()
 
 	repoPath := h.cache.RepoPath(input.Repo)
 	args := []string{"ls-tree"}

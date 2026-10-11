@@ -47,10 +47,11 @@ func (h *ReadFile) Execute(ctx context.Context, input ReadFileInput) (*ReadFileO
 		return nil, err
 	}
 
-	sha, err := h.cache.Ensure(ctx, input.Repo, input.Ref, false)
+	sha, release, err := h.cache.Ensure(ctx, input.Repo, input.Ref, false)
 	if err != nil {
 		return nil, err
 	}
+	defer release()
 
 	repoPath := h.cache.RepoPath(input.Repo)
 	content, truncated, err := h.executor.RunLimited(ctx, repoPath, h.maxFileSize, "cat-file", "blob", fmt.Sprintf("%s:%s", sha, input.Path))

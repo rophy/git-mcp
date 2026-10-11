@@ -33,10 +33,11 @@ func (h *ResolveRef) Execute(ctx context.Context, input ResolveRefInput) (*Resol
 		return nil, err
 	}
 
-	sha, err := h.cache.Ensure(ctx, input.Repo, input.Ref, input.Refresh)
+	sha, release, err := h.cache.Ensure(ctx, input.Repo, input.Ref, input.Refresh)
 	if err != nil {
 		return nil, err
 	}
+	release()
 
 	return &ResolveRefOutput{SHA: sha}, nil
 }

@@ -54,9 +54,10 @@ func setupTestRepo(t *testing.T) (cacheManager *cache.Manager, repo string, head
 
 	cacheDir := filepath.Join(dir, "cache")
 	executor := git.NewExecutor(30 * time.Second)
-	mgr := cache.NewManager(cacheDir, executor, func(r string) (string, string, error) {
+	mgr, err := cache.NewManager(cacheDir, 0, executor, func(r string) (string, string, error) {
 		return bareDir, "", nil
 	})
+	require.NoError(t, err)
 
 	return mgr, "test/org/repo", sha
 }

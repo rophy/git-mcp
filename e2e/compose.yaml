@@ -33,6 +33,7 @@ services:
     <<: *git-mcp-image
     volumes:
       - ./config.yaml:/etc/git-mcp/config.yaml:ro
+      - cache:/data/repos
     depends_on:
       gitserver:
         condition: service_healthy
@@ -47,8 +48,10 @@ services:
       CGO_ENABLED: "0"
       GIT_MCP_URL: http://git-mcp:8080
       JWKS_LISTEN: ":8081"
+      CACHE_DIR: /cache
     volumes:
       - ..:/src:ro
+      - cache:/cache:ro
       - gocache:/root/.cache/go-build
       - gomod:/go/pkg/mod
     depends_on:
@@ -57,5 +60,6 @@ services:
 
 volumes:
   upstream:
+  cache:
   gocache:
   gomod:

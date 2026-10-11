@@ -54,7 +54,11 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	cacheMgr := cache.NewManager(cfg.Server.CacheDir, executor, cfg.UpstreamURL)
+	cacheMgr, err := cache.NewManager(cfg.Server.CacheDir, cfg.Server.MaxCacheBytes, executor, cfg.UpstreamURL)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
 	var authenticator *auth.Authenticator
 	if !useStdio && len(cfg.Auth.Issuers) > 0 {
 		authenticator, err = auth.NewAuthenticator(ctx, cfg)

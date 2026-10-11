@@ -52,10 +52,11 @@ func (h *GitShow) Execute(ctx context.Context, input GitShowInput) (*GitShowOutp
 		}
 	}
 
-	sha, err := h.cache.Ensure(ctx, input.Repo, input.Ref, false)
+	sha, release, err := h.cache.Ensure(ctx, input.Repo, input.Ref, false)
 	if err != nil {
 		return nil, err
 	}
+	defer release()
 
 	repoPath := h.cache.RepoPath(input.Repo)
 

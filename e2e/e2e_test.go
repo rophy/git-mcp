@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -279,4 +280,34 @@ func TestValidation_RejectsMaliciousInput(t *testing.T) {
 	var ref tools.ResolveRefOutput
 	require.Empty(t, call(t, session, "resolve_ref", map[string]any{"repo": repoA, "ref": "main"}, &ref))
 	assert.Len(t, ref.SHA, 40)
+}
+
+func TestCache_EvictsLeastRecentlyUsedRepo(t *testing.T) {
+	cacheDir := os.Getenv("CACHE_DIR")
+	if cacheDir == "" {
+		t.Skip("CACHE_DIR not set")
+	}
+	cached := func(repo string) bool {
+		_, err := os.Stat(filepath.Join(cacheDir, repo+".git", "HEAD"))
+		return err == nil
+	}
+	session := connect(t, "reader")
+	resolve := func(repo string) {
+		t.Helper()
+		var out tools.ResolveRefOutput
+		require.Empty(t, call(t, session, "resolve_ref", map[string]any{"repo": repo, "ref": "main"}, &out))
+		require.Len(t, out.SHA, 40)
+	}
+
+	// max_cache_size fits one repo.
+	resolve(repoA)
+	assert.True(t, cached(repoA))
+
+	resolve(repoB)
+	assert.True(t, cached(repoB))
+	assert.False(t, cached(repoA), "repo-a should be evicted")
+
+	resolve(repoA)
+	assert.True(t, cached(repoA), "repo-a should be cloned again")
+	assert.False(t, cached(repoB), "repo-b should be evicted")
 }

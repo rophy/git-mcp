@@ -58,10 +58,11 @@ func (h *SearchCode) Execute(ctx context.Context, input SearchCodeInput) (*Searc
 		}
 	}
 
-	sha, err := h.cache.Ensure(ctx, input.Repo, input.Ref, false)
+	sha, release, err := h.cache.Ensure(ctx, input.Repo, input.Ref, false)
 	if err != nil {
 		return nil, err
 	}
+	defer release()
 
 	limit := h.maxMatches
 	if input.MaxMatches > 0 && input.MaxMatches < limit {

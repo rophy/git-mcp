@@ -1,6 +1,7 @@
 server:
   listen: "0.0.0.0:8080"
   cache_dir: "/data/repos"
+  max_cache_size: "30KB"   # one fixture repo (~22KB) fits, two do not
   git_timeout: "30s"
 
 upstream:

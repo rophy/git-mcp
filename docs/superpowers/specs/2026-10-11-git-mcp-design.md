@@ -94,6 +94,9 @@ Lazy — only fetch when a requested ref can't be resolved locally. No periodic 
 - Triggered when total disk usage exceeds a configured threshold (e.g., `max_cache_size: 50GB`).
 - Evicts least-recently-accessed repos until under threshold.
 - Never evicts a repo mid-request (reference counting).
+- Runs after each clone or fetch, and at startup. Empty or `0` means no limit.
+- Last access is stored as the repo directory mtime, so the order survives a restart.
+- An evicted repo is renamed into `<cache_dir>/.trash/` and then deleted, so a new request can clone it again at once.
 
 ### Concurrency
 
