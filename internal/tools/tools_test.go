@@ -300,3 +300,15 @@ func TestReadFile_NoTrailingNewline(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "1\tx\n2\ty\n", result.Content)
 }
+
+func TestSearchCode_InvalidRegexIsError(t *testing.T) {
+	mgr, repo, _ := setupTestRepo(t)
+	executor := git.NewExecutor(30 * time.Second)
+	handler := tools.NewSearchCode(mgr, executor, 50, 1024*1024)
+
+	// git grep exits 128 on a bad regex; only exit 1 means "no match".
+	_, err := handler.Execute(context.Background(), tools.SearchCodeInput{
+		Repo: repo, Ref: "main", Pattern: "(",
+	})
+	require.Error(t, err)
+}

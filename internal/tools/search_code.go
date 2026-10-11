@@ -2,7 +2,9 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os/exec"
 	"strconv"
 	"strings"
 
@@ -77,7 +79,9 @@ func (h *SearchCode) Execute(ctx context.Context, input SearchCodeInput) (*Searc
 
 	out, outTruncated, err := h.executor.RunLimited(ctx, repoPath, h.maxOutputSize, args...)
 	if err != nil {
-		if strings.Contains(err.Error(), "exit status 1") {
+		// git grep exits 1 when nothing matches.
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
 			return &SearchCodeOutput{SHA: sha, Matches: []SearchMatch{}}, nil
 		}
 		return nil, err
