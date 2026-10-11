@@ -49,26 +49,25 @@ func addTool[In, Out any](srv *mcp.Server, authenticator *auth.Authenticator, na
 
 func New(cfg *config.Config, cacheMgr *cache.Manager, executor *git.Executor, authenticator *auth.Authenticator, logger *slog.Logger) *mcp.Server {
 	srv := mcp.NewServer(&mcp.Implementation{Name: "git-mcp", Version: "0.1.0"}, nil)
-	maxOutputSize := parseSize(cfg.Server.MaxOutputSize, 1024*1024)
 
 	addTool(srv, authenticator, "resolve_ref",
 		"Resolve a git ref (branch, tag, SHA) to a commit SHA. Use refresh=true to fetch latest from upstream.",
 		tools.NewResolveRef(cacheMgr).Execute)
 	addTool(srv, authenticator, "search_code",
 		"Search code with regex across a repository. Returns matching lines with file paths and line numbers.",
-		tools.NewSearchCode(cacheMgr, executor, cfg.Server.MaxMatches, maxOutputSize).Execute)
+		tools.NewSearchCode(cacheMgr, executor, cfg.Server.MaxMatches, cfg.Server.MaxOutputBytes).Execute)
 	addTool(srv, authenticator, "read_file",
 		"Read file contents at a specific ref. Returns numbered lines. Supports line range selection.",
-		tools.NewReadFile(cacheMgr, executor, parseSize(cfg.Server.MaxFileSize, 1024*1024)).Execute)
+		tools.NewReadFile(cacheMgr, executor, cfg.Server.MaxFileBytes).Execute)
 	addTool(srv, authenticator, "list_files",
 		"List files and directories at a path in a repository.",
-		tools.NewListFiles(cacheMgr, executor, maxOutputSize).Execute)
+		tools.NewListFiles(cacheMgr, executor, cfg.Server.MaxOutputBytes).Execute)
 	addTool(srv, authenticator, "git_log",
 		"Show commit history for a repository, optionally filtered by path.",
-		tools.NewGitLog(cacheMgr, executor, maxOutputSize).Execute)
+		tools.NewGitLog(cacheMgr, executor, cfg.Server.MaxOutputBytes).Execute)
 	addTool(srv, authenticator, "git_show",
 		"Show a commit's metadata and diff.",
-		tools.NewGitShow(cacheMgr, executor, parseSize(cfg.Server.MaxDiffSize, 500*1024)).Execute)
+		tools.NewGitShow(cacheMgr, executor, cfg.Server.MaxDiffBytes).Execute)
 
 	return srv
 }
@@ -107,22 +106,4 @@ func RunHTTP(ctx context.Context, srv *mcp.Server, listen string, authenticator 
 		return err
 	}
 	return nil
-}
-
-func parseSize(s string, defaultVal int) int {
-	if s == "" {
-		return defaultVal
-	}
-	var val int
-	var unit string
-	fmt.Sscanf(s, "%d%s", &val, &unit)
-	switch unit {
-	case "KB":
-		return val * 1024
-	case "MB":
-		return val * 1024 * 1024
-	case "GB":
-		return val * 1024 * 1024 * 1024
-	}
-	return val
 }

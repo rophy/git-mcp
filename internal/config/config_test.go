@@ -1,6 +1,8 @@
 package config_test
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -97,4 +99,57 @@ func TestServiceAllowsRepo_RejectsUncleanPath(t *testing.T) {
 	assert.False(t, wild.AllowsRepo("github.com/org/./repo-b"))
 	assert.False(t, wild.AllowsRepo("github.com/org//repo-b"))
 	assert.True(t, wild.AllowsRepo("github.com/org/repo-b"))
+}
+
+func TestParseSize(t *testing.T) {
+	tests := []struct {
+		in      string
+		want    int64
+		wantErr bool
+	}{
+		{"", 0, false},
+		{"0", 0, false},
+		{"512", 512, false},
+		{"500KB", 500 * 1024, false},
+		{"1MB", 1024 * 1024, false},
+		{"50GB", 50 * 1024 * 1024 * 1024, false},
+		{"2gb", 2 * 1024 * 1024 * 1024, false},
+		{" 1 MB ", 1024 * 1024, false},
+		{"1TB", 0, true},
+		{"abc", 0, true},
+		{"-1MB", 0, true},
+		{"1.5GB", 0, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.in, func(t *testing.T) {
+			got, err := config.ParseSize(tt.in)
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestLoadConfig_SizeDefaultsAndParsing(t *testing.T) {
+	cfg, err := config.Load("../../testdata/config_env.yaml")
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), cfg.Server.MaxCacheBytes)
+	assert.Equal(t, 1024*1024, cfg.Server.MaxFileBytes)
+	assert.Equal(t, 500*1024, cfg.Server.MaxDiffBytes)
+	assert.Equal(t, 1024*1024, cfg.Server.MaxOutputBytes)
+
+	cfg, err = config.Load("../../testdata/config.yaml")
+	require.NoError(t, err)
+	assert.Equal(t, int64(1024*1024*1024), cfg.Server.MaxCacheBytes)
+}
+
+func TestLoadConfig_InvalidSize(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	require.NoError(t, os.WriteFile(path, []byte("server:\n  max_cache_size: \"50XB\"\n"), 0o644))
+	_, err := config.Load(path)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "max_cache_size")
 }
