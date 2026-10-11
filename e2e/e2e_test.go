@@ -200,6 +200,11 @@ func TestTools_FullWorkflow(t *testing.T) {
 	assert.Equal(t, "add handler", log.Commits[0].Message)
 	assert.Equal(t, sha, log.Commits[0].SHA)
 
+	var diff tools.GitDiffOutput
+	require.Empty(t, call(t, session, "git_diff", map[string]any{"repo": repoA, "base": log.Commits[1].SHA, "head": "main"}, &diff))
+	assert.Equal(t, sha, diff.HeadSHA)
+	assert.Contains(t, diff.Diff, "+func Handle(err error) string {")
+
 	var show tools.GitShowOutput
 	require.Empty(t, call(t, session, "git_show", map[string]any{"repo": repoA, "ref": sha, "commit": sha}, &show))
 	assert.Equal(t, "add handler", show.Message)
@@ -261,6 +266,10 @@ func TestValidation_RejectsMaliciousInput(t *testing.T) {
 			map[string]any{"repo": repoA, "ref": "main", "commit": "--output=/tmp/x"}, "ref contains invalid characters"},
 		{"git_show reflog syntax", "git_show",
 			map[string]any{"repo": repoA, "ref": "main", "commit": "main@{0}"}, "ref contains invalid characters"},
+		{"git_diff option base", "git_diff",
+			map[string]any{"repo": repoA, "base": "--output=/tmp/x", "head": "main"}, "ref contains invalid characters"},
+		{"git_diff range head", "git_diff",
+			map[string]any{"repo": repoA, "base": "main", "head": "main...v1.0.0"}, "ref contains '..'"},
 		{"resolve_ref range", "resolve_ref",
 			map[string]any{"repo": repoA, "ref": "main..v1.0.0"}, "ref contains '..'"},
 		{"resolve_ref short hex", "resolve_ref",

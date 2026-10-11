@@ -53,6 +53,15 @@ func setupTestRepo(t *testing.T) (cacheManager *cache.Manager, repo string, head
 	run("git", "-c", "commit.gpgsign=false", "commit", "-m", "initial commit")
 	sha := run("git", "rev-parse", "HEAD")
 
+	// Branches "other" and "feature" each add one file on top of main.
+	for _, branch := range []string{"other", "feature"} {
+		run("git", "checkout", "-q", "-b", branch, "main")
+		require.NoError(t, os.WriteFile(filepath.Join(workDir, branch+".txt"), []byte(branch+" change\n"), 0o644))
+		run("git", "add", ".")
+		run("git", "-c", "commit.gpgsign=false", "commit", "-m", "add "+branch)
+	}
+	run("git", "checkout", "-q", "main")
+
 	bareDir := filepath.Join(dir, "upstream.git")
 	cmd := exec.Command("git", "clone", "--bare", workDir, bareDir)
 	out, err := cmd.CombinedOutput()
@@ -311,4 +320,77 @@ func TestSearchCode_InvalidRegexIsError(t *testing.T) {
 		Repo: repo, Ref: "main", Pattern: "(",
 	})
 	require.Error(t, err)
+}
+
+func TestGitDiff(t *testing.T) {
+	mgr, repo, _ := setupTestRepo(t)
+	executor := git.NewExecutor(30 * time.Second)
+	handler := tools.NewGitDiff(mgr, executor, 500*1024)
+
+	result, err := handler.Execute(context.Background(), tools.GitDiffInput{
+		Repo: repo, Base: "other", Head: "feature",
+	})
+	require.NoError(t, err)
+	assert.Len(t, result.BaseSHA, 40)
+	assert.Len(t, result.HeadSHA, 40)
+	assert.NotEqual(t, result.BaseSHA, result.HeadSHA)
+	assert.Contains(t, result.Diff, "+feature change")
+	assert.Contains(t, result.Diff, "-other change", "direct diff also shows what only base has")
+	assert.False(t, result.Truncated)
+}
+
+func TestGitDiff_MergeBase(t *testing.T) {
+	mgr, repo, _ := setupTestRepo(t)
+	executor := git.NewExecutor(30 * time.Second)
+	handler := tools.NewGitDiff(mgr, executor, 500*1024)
+
+	result, err := handler.Execute(context.Background(), tools.GitDiffInput{
+		Repo: repo, Base: "other", Head: "feature", MergeBase: true,
+	})
+	require.NoError(t, err)
+	assert.Contains(t, result.Diff, "+feature change")
+	assert.NotContains(t, result.Diff, "other change", "merge-base diff shows only head's changes")
+}
+
+func TestGitDiff_Path(t *testing.T) {
+	mgr, repo, _ := setupTestRepo(t)
+	executor := git.NewExecutor(30 * time.Second)
+	handler := tools.NewGitDiff(mgr, executor, 500*1024)
+
+	result, err := handler.Execute(context.Background(), tools.GitDiffInput{
+		Repo: repo, Base: "other", Head: "feature", Path: "feature.txt",
+	})
+	require.NoError(t, err)
+	assert.Contains(t, result.Diff, "+feature change")
+	assert.NotContains(t, result.Diff, "other.txt")
+}
+
+func TestGitDiff_Truncates(t *testing.T) {
+	mgr, repo, _ := setupTestRepo(t)
+	executor := git.NewExecutor(30 * time.Second)
+	handler := tools.NewGitDiff(mgr, executor, 20)
+
+	result, err := handler.Execute(context.Background(), tools.GitDiffInput{
+		Repo: repo, Base: "other", Head: "feature",
+	})
+	require.NoError(t, err)
+	assert.True(t, result.Truncated)
+	assert.Len(t, result.Diff, 20)
+}
+
+func TestGitDiff_RejectsInvalidInput(t *testing.T) {
+	mgr, repo, _ := setupTestRepo(t)
+	executor := git.NewExecutor(30 * time.Second)
+	handler := tools.NewGitDiff(mgr, executor, 500*1024)
+
+	tests := []tools.GitDiffInput{
+		{Repo: repo, Base: "--output=/tmp/x", Head: "main"},
+		{Repo: repo, Base: "main", Head: "main..other"},
+		{Repo: repo, Base: "main", Head: "other", Path: "../x"},
+		{Repo: repo, Base: "", Head: "main"},
+	}
+	for _, in := range tests {
+		_, err := handler.Execute(context.Background(), in)
+		assert.Error(t, err, "%+v", in)
+	}
 }

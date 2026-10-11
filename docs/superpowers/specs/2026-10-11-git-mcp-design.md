@@ -167,6 +167,17 @@ git show --first-parent --format=<format> <commit_sha>
 - **Returns:** `{sha, author, date, message, diff}`
 - **Guards:** diff output size capped (default 500KB), optional pathspec filter
 
+### git_diff
+
+```
+git diff <base_sha> <head_sha> [-- <path>]        # merge_base=false (default)
+git diff <base_sha>...<head_sha> [-- <path>]      # merge_base=true
+```
+
+- **Inputs:** `repo`, `base`, `head` (both validated with the ref rules), `path` (optional), `merge_base` (optional boolean, default false — when true, diff from the common ancestor, like a pull request)
+- **Returns:** `{base_sha, head_sha, diff, truncated}`
+- **Guards:** diff output size capped (`max_diff_size`), cut at a UTF-8 boundary
+
 ## Security Hardening
 
 Applied to all tools:
@@ -299,7 +310,6 @@ StatefulSet with persistent volume, or a Deployment with a PVC. Single replica i
 ## Future Additions (Not in MVP)
 
 - `git_blame` — line-level authorship
-- `git_diff` — diff between two refs
 - `find_symbols` — tree-sitter or ctags based symbol search
 - Repo management API (list cached repos, force refresh, evict)
 - Webhook-triggered cache refresh (on push events)

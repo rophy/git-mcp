@@ -69,6 +69,9 @@ func New(cfg *config.Config, cacheMgr *cache.Manager, executor *git.Executor, au
 	addTool(srv, authenticator, "git_show",
 		"Show a commit's metadata and diff.",
 		tools.NewGitShow(cacheMgr, executor, cfg.Server.MaxDiffBytes).Execute)
+	addTool(srv, authenticator, "git_diff",
+		"Show the diff between two refs. Set merge_base=true to diff from their common ancestor (pull-request style).",
+		tools.NewGitDiff(cacheMgr, executor, cfg.Server.MaxDiffBytes).Execute)
 
 	return srv
 }
