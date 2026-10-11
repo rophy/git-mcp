@@ -18,8 +18,8 @@ type Identity struct {
 	Subject string
 }
 
-// kidRefetchInterval limits how often an unknown kid can force a JWKS fetch.
-const kidRefetchInterval = time.Minute
+// defaultRefetchInterval limits how often a failed fetch or an unknown kid can force a JWKS fetch.
+const defaultRefetchInterval = time.Minute
 
 type issuerEntry struct {
 	name    string
@@ -30,11 +30,11 @@ type issuerEntry struct {
 	lastRefetch time.Time
 }
 
-// allowRefetch reports whether an unknown kid may force a JWKS fetch now.
-func (e *issuerEntry) allowRefetch() bool {
+// allowRefetch reports whether a JWKS fetch may be forced now.
+func (e *issuerEntry) allowRefetch(interval time.Duration) bool {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if time.Since(e.lastRefetch) < kidRefetchInterval {
+	if !e.lastRefetch.IsZero() && time.Since(e.lastRefetch) < interval {
 		return false
 	}
 	e.lastRefetch = time.Now()
@@ -46,6 +46,8 @@ type Authenticator struct {
 	issuers  map[string]*issuerEntry // keyed by iss claim value
 	services map[string]config.ServiceConfig
 	cache    *jwk.Cache
+
+	refetchInterval time.Duration
 }
 
 // NewAuthenticator creates an Authenticator. The JWKS cache stops refreshing when ctx is done.
@@ -65,6 +67,8 @@ func NewAuthenticator(ctx context.Context, cfg *config.Config) (*Authenticator, 
 		issuers:  issuers,
 		services: cfg.Services,
 		cache:    cache,
+
+		refetchInterval: defaultRefetchInterval,
 	}, nil
 }
 
@@ -93,6 +97,10 @@ func (a *Authenticator) Authenticate(tokenString string) (*Identity, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	keySet, err := a.cache.Get(ctx, issEntry.jwksURI)
+	if err != nil && issEntry.allowRefetch(a.refetchInterval) {
+		// A failed fetch stays cached until the next refresh; retry now.
+		keySet, err = a.cache.Refresh(ctx, issEntry.jwksURI)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("fetch JWKS for %s: %w", issEntry.name, err)
 	}
@@ -103,7 +111,7 @@ func (a *Authenticator) Authenticate(tokenString string) (*Identity, error) {
 			return nil, fmt.Errorf("missing kid header")
 		}
 		key, found := keySet.LookupKeyID(kid)
-		if !found && issEntry.allowRefetch() {
+		if !found && issEntry.allowRefetch(a.refetchInterval) {
 			// The issuer may have rotated its keys.
 			if refreshed, err := a.cache.Refresh(ctx, issEntry.jwksURI); err == nil {
 				key, found = refreshed.LookupKeyID(kid)

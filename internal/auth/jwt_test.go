@@ -210,6 +210,7 @@ type rotatingJWKSServer struct {
 	mu   sync.Mutex
 	set  jwk.Set
 	hits int
+	down bool
 }
 
 func newRotatingJWKSServer(t *testing.T) *rotatingJWKSServer {
@@ -219,6 +220,10 @@ func newRotatingJWKSServer(t *testing.T) *rotatingJWKSServer {
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		s.hits++
+		if s.down {
+			http.Error(w, "unavailable", http.StatusServiceUnavailable)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(s.set)
 	}))
@@ -236,6 +241,12 @@ func (s *rotatingJWKSServer) use(t *testing.T, key *rsa.PrivateKey, kid string) 
 	require.NoError(t, set.AddKey(pubKey))
 	s.mu.Lock()
 	s.set = set
+	s.mu.Unlock()
+}
+
+func (s *rotatingJWKSServer) setDown(down bool) {
+	s.mu.Lock()
+	s.down = down
 	s.mu.Unlock()
 }
 
@@ -297,4 +308,27 @@ func TestAuthenticate_UnknownKidRefetchIsRateLimited(t *testing.T) {
 		require.Error(t, err)
 	}
 	assert.LessOrEqual(t, jwks.fetches()-before, 1)
+}
+
+func TestAuthenticate_RecoversAfterFailedJWKSFetch(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+
+	jwks := newRotatingJWKSServer(t)
+	jwks.use(t, key, "kid-1")
+	jwks.setDown(true)
+	authenticator, err := auth.NewAuthenticator(t.Context(), newCfg(jwks.URL, map[string]config.ServiceConfig{
+		"agent": {Issuer: "test-issuer", Subject: "agent-sub"},
+	}))
+	require.NoError(t, err)
+	authenticator.SetRefetchInterval(0)
+
+	_, err = authenticator.Authenticate(signToken(t, key, "kid-1", validClaims()))
+	require.Error(t, err)
+
+	// The issuer comes back. The next request must not fail on the failed fetch.
+	jwks.setDown(false)
+	id, err := authenticator.Authenticate(signToken(t, key, "kid-1", validClaims()))
+	require.NoError(t, err)
+	assert.Equal(t, "agent", id.Service)
 }
