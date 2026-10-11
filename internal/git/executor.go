@@ -19,13 +19,17 @@ func NewExecutor(timeout time.Duration) *Executor {
 }
 
 func (e *Executor) Run(ctx context.Context, repoPath string, args ...string) (string, error) {
+	return e.RunWithEnv(ctx, repoPath, nil, args...)
+}
+
+func (e *Executor) RunWithEnv(ctx context.Context, repoPath string, extraEnv []string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, e.timeout)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.WaitDelay = 2 * time.Second
 	cmd.Dir = repoPath
-	cmd.Env = sanitizeEnv()
+	cmd.Env = append(sanitizeEnv(), extraEnv...)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

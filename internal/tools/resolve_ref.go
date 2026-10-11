@@ -40,3 +40,5 @@ func (h *ResolveRef) Execute(ctx context.Context, input ResolveRefInput) (*Resol
 
 	return &ResolveRefOutput{SHA: sha}, nil
 }
+
+func (i *ResolveRefInput) GetRepo() string { return i.Repo }

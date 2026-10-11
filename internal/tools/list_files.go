@@ -92,3 +92,5 @@ func (h *ListFiles) Execute(ctx context.Context, input ListFilesInput) (*ListFil
 
 	return &ListFilesOutput{SHA: sha, Entries: entries}, nil
 }
+
+func (i *ListFilesInput) GetRepo() string { return i.Repo }

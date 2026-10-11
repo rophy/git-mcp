@@ -3,7 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
-	"path/filepath"
+	"path"
 	"strings"
 	"time"
 
@@ -55,7 +55,7 @@ func (s ServiceConfig) AllowsRepo(repo string) bool {
 		}
 		if strings.HasSuffix(pattern, "/*") {
 			prefix := strings.TrimSuffix(pattern, "/*")
-			if filepath.Dir(repo) == prefix {
+			if path.Dir(repo) == prefix {
 				return true
 			}
 		}

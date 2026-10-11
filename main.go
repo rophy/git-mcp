@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"syscall"
 
 	"github.com/rophy/git-mcp/internal/auth"
 	"github.com/rophy/git-mcp/internal/cache"
@@ -57,9 +58,18 @@ func main() {
 	}
 
 	cacheMgr := cache.NewManager(cfg.Server.CacheDir, executor, upstreamResolver)
-	srv := server.New(cfg, cacheMgr, executor, logger)
+	var authenticator *auth.Authenticator
+	if !useStdio && len(cfg.Auth.Issuers) > 0 {
+		authenticator, err = auth.NewAuthenticator(cfg)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error initializing auth: %v\n", err)
+			os.Exit(1)
+		}
+	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	srv := server.New(cfg, cacheMgr, executor, authenticator, logger)
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	if useStdio {
@@ -74,14 +84,6 @@ func main() {
 	listen := cfg.Server.Listen
 	if listen == "" {
 		listen = "0.0.0.0:8080"
-	}
-	var authenticator *auth.Authenticator
-	if len(cfg.Auth.Issuers) > 0 {
-		authenticator, err = auth.NewAuthenticator(cfg)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error initializing auth: %v\n", err)
-			os.Exit(1)
-		}
 	}
 	if err := server.RunHTTP(ctx, srv, listen, authenticator, logger); err != nil {
 		logger.Error("http server error", "err", err)

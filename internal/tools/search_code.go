@@ -107,3 +107,5 @@ func (h *SearchCode) Execute(ctx context.Context, input SearchCodeInput) (*Searc
 
 	return &SearchCodeOutput{SHA: sha, Matches: matches, Truncated: truncated}, nil
 }
+
+func (i *SearchCodeInput) GetRepo() string { return i.Repo }

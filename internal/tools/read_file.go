@@ -85,3 +85,5 @@ func (h *ReadFile) Execute(ctx context.Context, input ReadFileInput) (*ReadFileO
 
 	return &ReadFileOutput{SHA: sha, Content: numbered.String()}, nil
 }
+
+func (i *ReadFileInput) GetRepo() string { return i.Repo }

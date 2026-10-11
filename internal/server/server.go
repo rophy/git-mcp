@@ -17,9 +17,27 @@ import (
 	"github.com/rophy/git-mcp/internal/tools"
 )
 
-func addTool[In, Out any](srv *mcp.Server, name, desc string, exec func(context.Context, In) (*Out, error)) {
+type repoInput interface{ GetRepo() string }
+
+func addTool[In, Out any](srv *mcp.Server, authenticator *auth.Authenticator, name, desc string, exec func(context.Context, In) (*Out, error)) {
 	mcp.AddTool(srv, &mcp.Tool{Name: name, Description: desc},
 		func(ctx context.Context, req *mcp.CallToolRequest, input In) (*mcp.CallToolResult, Out, error) {
+			if authenticator != nil {
+				if service := audit.ServiceFromContext(ctx); service != "" {
+					ri, ok := any(input).(repoInput)
+					if !ok {
+						ri, ok = any(&input).(repoInput)
+					}
+					if !ok || !authenticator.CheckRepoAccess(service, ri.GetRepo()) {
+						var zero Out
+						repo := ""
+						if ok {
+							repo = ri.GetRepo()
+						}
+						return nil, zero, fmt.Errorf("access denied to repo %s", repo)
+					}
+				}
+			}
 			result, err := exec(ctx, input)
 			if err != nil {
 				var zero Out
@@ -29,25 +47,25 @@ func addTool[In, Out any](srv *mcp.Server, name, desc string, exec func(context.
 		})
 }
 
-func New(cfg *config.Config, cacheMgr *cache.Manager, executor *git.Executor, logger *slog.Logger) *mcp.Server {
+func New(cfg *config.Config, cacheMgr *cache.Manager, executor *git.Executor, authenticator *auth.Authenticator, logger *slog.Logger) *mcp.Server {
 	srv := mcp.NewServer(&mcp.Implementation{Name: "git-mcp", Version: "0.1.0"}, nil)
 
-	addTool(srv, "resolve_ref",
+	addTool(srv, authenticator, "resolve_ref",
 		"Resolve a git ref (branch, tag, SHA) to a commit SHA. Use refresh=true to fetch latest from upstream.",
 		tools.NewResolveRef(cacheMgr).Execute)
-	addTool(srv, "search_code",
+	addTool(srv, authenticator, "search_code",
 		"Search code with regex across a repository. Returns matching lines with file paths and line numbers.",
 		tools.NewSearchCode(cacheMgr, executor, cfg.Server.MaxMatches).Execute)
-	addTool(srv, "read_file",
+	addTool(srv, authenticator, "read_file",
 		"Read file contents at a specific ref. Returns numbered lines. Supports line range selection.",
 		tools.NewReadFile(cacheMgr, executor, parseSize(cfg.Server.MaxFileSize, 1024*1024)).Execute)
-	addTool(srv, "list_files",
+	addTool(srv, authenticator, "list_files",
 		"List files and directories at a path in a repository.",
 		tools.NewListFiles(cacheMgr, executor).Execute)
-	addTool(srv, "git_log",
+	addTool(srv, authenticator, "git_log",
 		"Show commit history for a repository, optionally filtered by path.",
 		tools.NewGitLog(cacheMgr, executor).Execute)
-	addTool(srv, "git_show",
+	addTool(srv, authenticator, "git_show",
 		"Show a commit's metadata and diff.",
 		tools.NewGitShow(cacheMgr, executor, parseSize(cfg.Server.MaxDiffSize, 500*1024)).Execute)
 
@@ -74,7 +92,7 @@ func RunHTTP(ctx context.Context, srv *mcp.Server, listen string, authenticator 
 	}
 	h = audit.Middleware(h)
 
-	httpSrv := &http.Server{Addr: listen, Handler: h}
+	httpSrv := &http.Server{Addr: listen, Handler: h, ReadHeaderTimeout: 10 * time.Second}
 	go func() {
 		<-ctx.Done()
 		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

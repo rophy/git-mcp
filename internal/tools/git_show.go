@@ -95,3 +95,5 @@ func (h *GitShow) Execute(ctx context.Context, input GitShowInput) (*GitShowOutp
 		Truncated: truncated,
 	}, nil
 }
+
+func (i *GitShowInput) GetRepo() string { return i.Repo }

@@ -96,10 +96,7 @@ func (m *Manager) cloneRepo(ctx context.Context, repo, repoPath string) error {
 		return err
 	}
 
-	args := authArgs(token)
-	args = append(args, "clone", "--bare", "--end-of-options", url, repoPath)
-
-	_, err = m.executor.Run(ctx, ".", args...)
+	_, err = m.executor.RunWithEnv(ctx, ".", authEnv(token), "clone", "--bare", "--end-of-options", url, repoPath)
 	return err
 }
 
@@ -109,16 +106,17 @@ func (m *Manager) fetchRepo(ctx context.Context, repo, repoPath string) error {
 		return err
 	}
 
-	args := authArgs(token)
-	args = append(args, "fetch", "--prune", "--end-of-options", "origin", "+refs/heads/*:refs/heads/*", "+refs/tags/*:refs/tags/*")
-
-	_, err = m.executor.Run(ctx, repoPath, args...)
+	_, err = m.executor.RunWithEnv(ctx, repoPath, authEnv(token), "fetch", "--prune", "--end-of-options", "origin", "+refs/heads/*:refs/heads/*", "+refs/tags/*:refs/tags/*")
 	return err
 }
 
-func authArgs(token string) []string {
+func authEnv(token string) []string {
 	if token == "" {
 		return nil
 	}
-	return []string{"-c", fmt.Sprintf("http.extraHeader=Authorization: Bearer %s", token)}
+	return []string{
+		"GIT_CONFIG_COUNT=1",
+		"GIT_CONFIG_KEY_0=http.extraHeader",
+		"GIT_CONFIG_VALUE_0=Authorization: Bearer " + token,
+	}
 }
