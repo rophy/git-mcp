@@ -178,6 +178,16 @@ git diff <base_sha>...<head_sha> [-- <path>]      # merge_base=true
 - **Returns:** `{base_sha, head_sha, diff, truncated}`
 - **Guards:** diff output size capped (`max_diff_size`), cut at a UTF-8 boundary
 
+### git_blame
+
+```
+git blame --porcelain [-L <start>,<end>] <sha> -- <path>
+```
+
+- **Inputs:** `repo`, `ref`, `path`, `start_line` (optional), `end_line` (optional)
+- **Returns:** `{sha, lines: [{line, commit, text}], commits: {<commit_sha>: {author, date, summary}}, truncated}` — commit details appear once per commit, not once per line
+- **Guards:** output size capped (`max_output_size`); a partial last record is dropped
+
 ## Security Hardening
 
 Applied to all tools:
@@ -309,7 +319,6 @@ StatefulSet with persistent volume, or a Deployment with a PVC. Single replica i
 
 ## Future Additions (Not in MVP)
 
-- `git_blame` — line-level authorship
 - `find_symbols` — tree-sitter or ctags based symbol search
 - Repo management API (list cached repos, force refresh, evict)
 - Webhook-triggered cache refresh (on push events)

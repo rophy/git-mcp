@@ -57,6 +57,9 @@ func setupTestRepo(t *testing.T) (cacheManager *cache.Manager, repo string, head
 	for _, branch := range []string{"other", "feature"} {
 		run("git", "checkout", "-q", "-b", branch, "main")
 		require.NoError(t, os.WriteFile(filepath.Join(workDir, branch+".txt"), []byte(branch+" change\n"), 0o644))
+		if branch == "feature" {
+			require.NoError(t, os.WriteFile(filepath.Join(workDir, "README.md"), []byte("# Test\nfeature line\n"), 0o644))
+		}
 		run("git", "add", ".")
 		run("git", "-c", "commit.gpgsign=false", "commit", "-m", "add "+branch)
 	}
@@ -388,6 +391,84 @@ func TestGitDiff_RejectsInvalidInput(t *testing.T) {
 		{Repo: repo, Base: "main", Head: "main..other"},
 		{Repo: repo, Base: "main", Head: "other", Path: "../x"},
 		{Repo: repo, Base: "", Head: "main"},
+	}
+	for _, in := range tests {
+		_, err := handler.Execute(context.Background(), in)
+		assert.Error(t, err, "%+v", in)
+	}
+}
+
+func TestGitBlame(t *testing.T) {
+	mgr, repo, initialSHA := setupTestRepo(t)
+	executor := git.NewExecutor(30 * time.Second)
+	handler := tools.NewGitBlame(mgr, executor, 1024*1024)
+
+	result, err := handler.Execute(context.Background(), tools.GitBlameInput{
+		Repo: repo, Ref: "feature", Path: "README.md",
+	})
+	require.NoError(t, err)
+	featureSHA := result.SHA
+	require.NotEqual(t, initialSHA, featureSHA)
+
+	assert.Equal(t, []tools.BlameLine{
+		{Line: 1, Commit: initialSHA, Text: "# Test"},
+		{Line: 2, Commit: featureSHA, Text: "feature line"},
+	}, result.Lines)
+	require.Len(t, result.Commits, 2)
+	assert.Equal(t, "initial commit", result.Commits[initialSHA].Summary)
+	assert.Equal(t, "add feature", result.Commits[featureSHA].Summary)
+	assert.Equal(t, "test <test@test.com>", result.Commits[featureSHA].Author)
+	_, err = time.Parse(time.RFC3339, result.Commits[featureSHA].Date)
+	assert.NoError(t, err, "date must be RFC3339")
+	assert.False(t, result.Truncated)
+}
+
+func TestGitBlame_LineRange(t *testing.T) {
+	mgr, repo, _ := setupTestRepo(t)
+	executor := git.NewExecutor(30 * time.Second)
+	handler := tools.NewGitBlame(mgr, executor, 1024*1024)
+
+	start, end := 3, 4
+	result, err := handler.Execute(context.Background(), tools.GitBlameInput{
+		Repo: repo, Ref: "main", Path: "src/main.go", StartLine: &start, EndLine: &end,
+	})
+	require.NoError(t, err)
+	require.Len(t, result.Lines, 2)
+	assert.Equal(t, 3, result.Lines[0].Line)
+	assert.Equal(t, "func main() {", result.Lines[0].Text)
+	assert.Equal(t, "\tprintln(\"hello\")", result.Lines[1].Text)
+}
+
+func TestGitBlame_Truncates(t *testing.T) {
+	mgr, repo, _ := setupTestRepo(t)
+	executor := git.NewExecutor(30 * time.Second)
+	input := tools.GitBlameInput{Repo: repo, Ref: "main", Path: "src/main.go"}
+
+	full, err := tools.NewGitBlame(mgr, executor, 1024*1024).Execute(context.Background(), input)
+	require.NoError(t, err)
+	require.Len(t, full.Lines, 5)
+
+	// The first record carries the commit header (~300 bytes); later ones are short.
+	result, err := tools.NewGitBlame(mgr, executor, 400).Execute(context.Background(), input)
+	require.NoError(t, err)
+	assert.True(t, result.Truncated)
+	require.NotEmpty(t, result.Lines)
+	require.Less(t, len(result.Lines), 5)
+	assert.Equal(t, full.Lines[:len(result.Lines)], result.Lines)
+}
+
+func TestGitBlame_RejectsInvalidInput(t *testing.T) {
+	mgr, repo, _ := setupTestRepo(t)
+	executor := git.NewExecutor(30 * time.Second)
+	handler := tools.NewGitBlame(mgr, executor, 1024*1024)
+
+	zero, one, two := 0, 1, 2
+	tests := []tools.GitBlameInput{
+		{Repo: repo, Ref: "main"},
+		{Repo: repo, Ref: "main", Path: "../x"},
+		{Repo: repo, Ref: "--output=/tmp/x", Path: "README.md"},
+		{Repo: repo, Ref: "main", Path: "README.md", StartLine: &zero},
+		{Repo: repo, Ref: "main", Path: "README.md", StartLine: &two, EndLine: &one},
 	}
 	for _, in := range tests {
 		_, err := handler.Execute(context.Background(), in)

@@ -205,6 +205,13 @@ func TestTools_FullWorkflow(t *testing.T) {
 	assert.Equal(t, sha, diff.HeadSHA)
 	assert.Contains(t, diff.Diff, "+func Handle(err error) string {")
 
+	start, end := 3, 3
+	var blame tools.GitBlameOutput
+	require.Empty(t, call(t, session, "git_blame", map[string]any{"repo": repoA, "ref": sha, "path": "pkg/handler.go", "start_line": start, "end_line": end}, &blame))
+	require.Len(t, blame.Lines, 1)
+	assert.Equal(t, tools.BlameLine{Line: 3, Commit: sha, Text: "func Handle(err error) string {"}, blame.Lines[0])
+	assert.Equal(t, "add handler", blame.Commits[sha].Summary)
+
 	var show tools.GitShowOutput
 	require.Empty(t, call(t, session, "git_show", map[string]any{"repo": repoA, "ref": sha, "commit": sha}, &show))
 	assert.Equal(t, "add handler", show.Message)
@@ -270,6 +277,10 @@ func TestValidation_RejectsMaliciousInput(t *testing.T) {
 			map[string]any{"repo": repoA, "base": "--output=/tmp/x", "head": "main"}, "ref contains invalid characters"},
 		{"git_diff range head", "git_diff",
 			map[string]any{"repo": repoA, "base": "main", "head": "main...v1.0.0"}, "ref contains '..'"},
+		{"git_blame traversal", "git_blame",
+			map[string]any{"repo": repoA, "ref": "main", "path": "../../etc/passwd"}, "path contains '..'"},
+		{"git_blame option path", "git_blame",
+			map[string]any{"repo": repoA, "ref": "main", "path": "--contents=/etc/passwd"}, "path must not start with -"},
 		{"resolve_ref range", "resolve_ref",
 			map[string]any{"repo": repoA, "ref": "main..v1.0.0"}, "ref contains '..'"},
 		{"resolve_ref short hex", "resolve_ref",

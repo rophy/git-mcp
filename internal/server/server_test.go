@@ -66,6 +66,7 @@ func TestNew_ToolSchemasRequireOnlyMandatoryInputs(t *testing.T) {
 		"git_log":     {"repo", "ref"},
 		"git_show":    {"repo", "ref", "commit"},
 		"git_diff":    {"repo", "base", "head"},
+		"git_blame":   {"repo", "ref", "path"},
 	}, got)
 }
 

@@ -72,6 +72,9 @@ func New(cfg *config.Config, cacheMgr *cache.Manager, executor *git.Executor, au
 	addTool(srv, authenticator, "git_diff",
 		"Show the diff between two refs. Set merge_base=true to diff from their common ancestor (pull-request style).",
 		tools.NewGitDiff(cacheMgr, executor, cfg.Server.MaxDiffBytes).Execute)
+	addTool(srv, authenticator, "git_blame",
+		"Show which commit last changed each line of a file. Supports line range selection.",
+		tools.NewGitBlame(cacheMgr, executor, cfg.Server.MaxOutputBytes).Execute)
 
 	return srv
 }
