@@ -67,3 +67,9 @@ func TestValidatePath(t *testing.T) {
 		assert.Error(t, validate.Path(p), "should be invalid: %s", p)
 	}
 }
+
+func TestValidatePattern(t *testing.T) {
+	assert.NoError(t, validate.Pattern("hello"))
+	assert.Error(t, validate.Pattern("-e malicious"))
+	assert.Error(t, validate.Pattern(""))
+}

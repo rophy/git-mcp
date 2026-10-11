@@ -72,6 +72,12 @@ func Path(path string) error {
 	if strings.HasPrefix(path, "/") {
 		return fmt.Errorf("path is absolute: %q", path)
 	}
+	if strings.HasPrefix(path, "-") {
+		return fmt.Errorf("path must not start with -: %q", path)
+	}
+	if strings.ContainsRune(path, 0) {
+		return fmt.Errorf("path contains null byte")
+	}
 	parts := strings.Split(path, "/")
 	for _, part := range parts {
 		if part == ".." {
@@ -87,6 +93,9 @@ func Path(path string) error {
 func Pattern(pattern string) error {
 	if pattern == "" {
 		return fmt.Errorf("pattern is empty")
+	}
+	if strings.HasPrefix(pattern, "-") {
+		return fmt.Errorf("pattern must not start with -")
 	}
 	return nil
 }
