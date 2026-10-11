@@ -50,11 +50,12 @@ func TestExecutorRun(t *testing.T) {
 }
 
 func TestExecutorTimeout(t *testing.T) {
-	repoDir := setupBareRepo(t)
-	exec := git.NewExecutor(1 * time.Millisecond)
+	exec := git.NewExecutor(50 * time.Millisecond)
 
-	_, err := exec.Run(context.Background(), repoDir, "rev-parse", "--verify", "HEAD")
+	// Clone a non-routable IP to guarantee the timeout fires
+	_, err := exec.Run(context.Background(), t.TempDir(), "clone", "https://192.0.2.1/repo.git", "out")
 	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "timed out")
 }
 
 func TestExecutorSanitizesEnv(t *testing.T) {
