@@ -3,12 +3,16 @@ package git
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
 	"time"
 )
+
+// ErrTimeout is wrapped by errors from git commands that hit the timeout.
+var ErrTimeout = errors.New("git command timed out")
 
 type Executor struct {
 	timeout time.Duration
@@ -53,7 +57,7 @@ func (e *Executor) run(ctx context.Context, repoPath string, extraEnv []string, 
 
 	if err := cmd.Run(); err != nil && !stdout.exceeded {
 		if ctx.Err() == context.DeadlineExceeded {
-			return "", false, fmt.Errorf("git command timed out after %s", e.timeout)
+			return "", false, fmt.Errorf("%w after %s", ErrTimeout, e.timeout)
 		}
 		return "", false, fmt.Errorf("git %s: %s: %w", strings.Join(args, " "), stderr.String(), err)
 	}

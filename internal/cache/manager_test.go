@@ -16,6 +16,7 @@ import (
 
 	"github.com/rophy/git-mcp/internal/cache"
 	"github.com/rophy/git-mcp/internal/git"
+	"github.com/rophy/git-mcp/internal/toolerr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -299,6 +300,7 @@ func TestEnsure_KilledCloneLeavesNoBrokenRepo(t *testing.T) {
 
 	_, _, err = mgr.Ensure(context.Background(), "h/o/a", "main", false)
 	require.Error(t, err, "clone must time out")
+	assert.Equal(t, toolerr.Timeout, toolerr.CodeOf(err), "%v", err)
 	_, err = os.Stat(mgr.RepoPath("h/o/a"))
 	assert.True(t, os.IsNotExist(err), "killed clone left a directory at the repo path")
 
@@ -308,4 +310,53 @@ func TestEnsure_KilledCloneLeavesNoBrokenRepo(t *testing.T) {
 	require.NoError(t, err)
 	defer release()
 	assert.Equal(t, expectedSHA, sha)
+}
+
+func TestEnsure_ErrorCodes(t *testing.T) {
+	upstreamPath, _ := setupUpstreamRepo(t)
+
+	t.Run("ref not found after successful fetch", func(t *testing.T) {
+		mgr := newManager(t, t.TempDir(), upstreamPath, 0)
+		ensure(t, mgr, "h/o/a")
+		_, _, err := mgr.Ensure(context.Background(), "h/o/a", "no-such-branch", false)
+		assert.Equal(t, toolerr.RefNotFound, toolerr.CodeOf(err), "%v", err)
+	})
+
+	t.Run("ref not found on first clone", func(t *testing.T) {
+		mgr := newManager(t, t.TempDir(), upstreamPath, 0)
+		_, _, err := mgr.Ensure(context.Background(), "h/o/a", "no-such-branch", false)
+		assert.Equal(t, toolerr.RefNotFound, toolerr.CodeOf(err), "%v", err)
+	})
+
+	t.Run("clone fails", func(t *testing.T) {
+		mgr := newManager(t, t.TempDir(), filepath.Join(t.TempDir(), "missing.git"), 0)
+		_, _, err := mgr.Ensure(context.Background(), "h/o/a", "main", false)
+		assert.Equal(t, toolerr.UpstreamError, toolerr.CodeOf(err), "%v", err)
+	})
+
+	t.Run("fetch fails", func(t *testing.T) {
+		upstream := upstreamPath
+		executor := git.NewExecutor(30 * time.Second)
+		mgr, err := cache.NewManager(t.TempDir(), 0, executor, func(string) (string, string, error) {
+			return upstream, "", nil
+		})
+		require.NoError(t, err)
+		ensure(t, mgr, "h/o/a")
+		require.NoError(t, os.RemoveAll(upstreamPath+".moved"))
+		require.NoError(t, os.Rename(upstreamPath, upstreamPath+".moved"))
+		t.Cleanup(func() { os.Rename(upstreamPath+".moved", upstreamPath) })
+
+		_, _, err = mgr.Ensure(context.Background(), "h/o/a", "main", true)
+		assert.Equal(t, toolerr.UpstreamError, toolerr.CodeOf(err), "%v", err)
+	})
+
+	t.Run("no upstream configured", func(t *testing.T) {
+		executor := git.NewExecutor(30 * time.Second)
+		mgr, err := cache.NewManager(t.TempDir(), 0, executor, func(string) (string, string, error) {
+			return "", "", fmt.Errorf("no upstream configured for host %q", "h")
+		})
+		require.NoError(t, err)
+		_, _, err = mgr.Ensure(context.Background(), "h/o/a", "main", false)
+		assert.Equal(t, toolerr.InvalidInput, toolerr.CodeOf(err), "%v", err)
+	})
 }

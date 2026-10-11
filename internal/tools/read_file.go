@@ -7,6 +7,7 @@ import (
 
 	"github.com/rophy/git-mcp/internal/cache"
 	"github.com/rophy/git-mcp/internal/git"
+	"github.com/rophy/git-mcp/internal/toolerr"
 	"github.com/rophy/git-mcp/internal/validate"
 )
 
@@ -41,7 +42,7 @@ func (h *ReadFile) Execute(ctx context.Context, input ReadFileInput) (*ReadFileO
 		return nil, err
 	}
 	if input.Path == "" {
-		return nil, fmt.Errorf("path is required")
+		return nil, toolerr.Errorf(toolerr.InvalidInput, "path is required")
 	}
 	if err := validate.Path(input.Path); err != nil {
 		return nil, err
@@ -60,7 +61,7 @@ func (h *ReadFile) Execute(ctx context.Context, input ReadFileInput) (*ReadFileO
 	}
 
 	if truncated {
-		return nil, fmt.Errorf("file exceeds max size (%d bytes)", h.maxFileSize)
+		return nil, toolerr.Errorf(toolerr.InvalidInput, "file exceeds max size (%d bytes)", h.maxFileSize)
 	}
 
 	// A final newline ends the last line; it does not start a new one.

@@ -3,8 +3,10 @@ package validate_test
 import (
 	"testing"
 
+	"github.com/rophy/git-mcp/internal/toolerr"
 	"github.com/rophy/git-mcp/internal/validate"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestValidateRef(t *testing.T) {
@@ -72,4 +74,18 @@ func TestValidatePattern(t *testing.T) {
 	assert.NoError(t, validate.Pattern("hello"))
 	assert.Error(t, validate.Pattern("-e malicious"))
 	assert.Error(t, validate.Pattern(""))
+}
+
+func TestErrorsAreInvalidInput(t *testing.T) {
+	errs := []error{
+		validate.Ref(""),
+		validate.Ref("--x"),
+		validate.Repo("a/b"),
+		validate.Path("../x"),
+		validate.Pattern("-x"),
+	}
+	for _, err := range errs {
+		require.Error(t, err)
+		assert.Equal(t, toolerr.InvalidInput, toolerr.CodeOf(err), "%v", err)
+	}
 }

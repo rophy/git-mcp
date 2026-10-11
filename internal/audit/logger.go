@@ -15,6 +15,7 @@ type Entry struct {
 	Path        string
 	Duration    time.Duration
 	Error       string
+	ErrorCode   string
 }
 
 type Logger struct {
@@ -49,6 +50,9 @@ func (l *Logger) Log(e Entry) {
 
 	if e.Error != "" {
 		attrs = append(attrs, slog.String("error", e.Error))
+	}
+	if e.ErrorCode != "" {
+		attrs = append(attrs, slog.String("error_code", e.ErrorCode))
 	}
 
 	args := make([]any, len(attrs))

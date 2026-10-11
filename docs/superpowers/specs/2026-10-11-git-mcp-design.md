@@ -255,7 +255,7 @@ services:
 5. Validate `aud` contains `git-mcp` (from `auth.audience`). Validate `exp`/`nbf`.
 6. Match `(iss, sub)` pair → service name in config.
 7. Check if requested repo matches the service's allowed repos. A repo path that is not clean (`.`, `..`, `//`) never matches.
-8. Auth failure (steps 1–6) → HTTP 401 with `WWW-Authenticate: Bearer realm="git-mcp"` (plus `error="invalid_token"` for a bad token). Repo denied (step 7) → MCP tool error `access denied to repo <repo>` (HTTP 200, `isError: true`). Allow → proceed. Every tool call is logged (see Audit Log).
+8. Auth failure (steps 1–6) → HTTP 401 with `WWW-Authenticate: Bearer realm="git-mcp"` (plus `error="invalid_token"` for a bad token). Repo denied (step 7) → MCP tool error with `_meta.error_code: access_denied` (HTTP 200, `isError: true`). All tool errors carry a stable `error_code` (see README, "Errors"); codes come only from facts git-mcp knows (validation, access check, timeout, clone/fetch failed, ref not found after a successful fetch), never from parsing host-specific git messages. Allow → proceed. Every tool call is logged (see Audit Log).
 9. The check fails closed: with auth on, a call without an authenticated service is denied.
 
 ### Audit Log
@@ -266,7 +266,7 @@ Structured JSON, one line per tool call. Callers pass a correlation ID via the `
 {"time":"2026-10-11T14:30:00Z","level":"INFO","msg":"tool_call","service":"diagnostics-agent","request_id":"req-abc123","tool":"read_file","repo":"github.com/org/checkout-service","ref":"v2.7.0","resolved_sha":"a1b2c3d4...","path":"src/handler.ts","duration_ms":12}
 ```
 
-Denied and failed calls are logged too, with an `error` field. For `git_diff`, `ref` is `<base>...<head>`.
+Denied and failed calls are logged too, with `error` and `error_code` fields. For `git_diff`, `ref` is `<base>...<head>`.
 
 ## Deployment
 

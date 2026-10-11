@@ -331,3 +331,33 @@ func TestCache_EvictsLeastRecentlyUsedRepo(t *testing.T) {
 	assert.True(t, cached(repoA), "repo-a should be cloned again")
 	assert.False(t, cached(repoB), "repo-b should be evicted")
 }
+
+func TestErrors_HaveStableCodes(t *testing.T) {
+	reader := connect(t, "reader")
+	narrow := connect(t, "narrow")
+
+	tests := []struct {
+		name     string
+		session  *mcp.ClientSession
+		args     map[string]any
+		wantCode string
+	}{
+		{"unknown ref", reader, map[string]any{"repo": repoA, "ref": "no-such-branch"}, "ref_not_found"},
+		{"repo missing upstream", reader, map[string]any{"repo": "git.test/org/no-such-repo", "ref": "main"}, "upstream_error"},
+		{"no upstream for host", reader, map[string]any{"repo": "unknown.test/org/repo", "ref": "main"}, "access_denied"},
+		{"access denied", narrow, map[string]any{"repo": repoB, "ref": "main"}, "access_denied"},
+		{"invalid ref", reader, map[string]any{"repo": repoA, "ref": "--x"}, "invalid_input"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			defer cancel()
+			res, err := tt.session.CallTool(ctx, &mcp.CallToolParams{Name: "resolve_ref", Arguments: tt.args})
+			require.NoError(t, err)
+			require.True(t, res.IsError)
+			assert.Equal(t, tt.wantCode, res.Meta["error_code"])
+			text := res.Content[0].(*mcp.TextContent).Text
+			assert.True(t, strings.HasPrefix(text, tt.wantCode+": "), text)
+		})
+	}
+}

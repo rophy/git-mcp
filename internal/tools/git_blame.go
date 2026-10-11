@@ -9,6 +9,7 @@ import (
 
 	"github.com/rophy/git-mcp/internal/cache"
 	"github.com/rophy/git-mcp/internal/git"
+	"github.com/rophy/git-mcp/internal/toolerr"
 	"github.com/rophy/git-mcp/internal/validate"
 )
 
@@ -35,7 +36,7 @@ type BlameCommit struct {
 type GitBlameOutput struct {
 	SHA       string                 `json:"sha"`
 	Lines     []BlameLine            `json:"lines"`
-	Commits   map[string]BlameCommit `json:"commits"`
+	Commits   map[string]BlameCommit `json:"commits,omitempty"`
 	Truncated bool                   `json:"truncated"`
 }
 
@@ -57,7 +58,7 @@ func (h *GitBlame) Execute(ctx context.Context, input GitBlameInput) (*GitBlameO
 		return nil, err
 	}
 	if input.Path == "" {
-		return nil, fmt.Errorf("path is required")
+		return nil, toolerr.Errorf(toolerr.InvalidInput, "path is required")
 	}
 	if err := validate.Path(input.Path); err != nil {
 		return nil, err
@@ -104,7 +105,7 @@ func blameRange(start, end *int) (string, error) {
 		e = *end
 	}
 	if s < 1 || (end != nil && e < s) {
-		return "", fmt.Errorf("invalid line range: start_line=%d end_line=%d", s, e)
+		return "", toolerr.Errorf(toolerr.InvalidInput, "invalid line range: start_line=%d end_line=%d", s, e)
 	}
 	if end == nil {
 		return fmt.Sprintf("%d,", s), nil

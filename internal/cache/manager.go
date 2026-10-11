@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/rophy/git-mcp/internal/git"
+	"github.com/rophy/git-mcp/internal/toolerr"
 )
 
 type UpstreamResolver func(repo string) (url string, token string, err error)
@@ -153,7 +154,7 @@ func (m *Manager) ensure(ctx context.Context, st *repoState, repo, ref string, r
 	if !exists {
 		changed = true
 		if err := m.cloneRepo(ctx, repo, repoPath); err != nil {
-			return "", changed, fmt.Errorf("clone %s: %w", repo, err)
+			return "", changed, upstreamErr(fmt.Errorf("clone %s: %w", repo, err))
 		}
 	}
 	now := time.Now()
@@ -162,7 +163,7 @@ func (m *Manager) ensure(ctx context.Context, st *repoState, repo, ref string, r
 	if refresh && exists {
 		changed = true
 		if err := m.fetchRepo(ctx, repo, repoPath); err != nil {
-			return "", changed, fmt.Errorf("fetch %s: %w", repo, err)
+			return "", changed, upstreamErr(fmt.Errorf("fetch %s: %w", repo, err))
 		}
 	}
 
@@ -170,16 +171,33 @@ func (m *Manager) ensure(ctx context.Context, st *repoState, repo, ref string, r
 	if err != nil && exists {
 		changed = true
 		if fetchErr := m.fetchRepo(ctx, repo, repoPath); fetchErr != nil {
-			return "", changed, fmt.Errorf("fetch %s: %w", repo, fetchErr)
+			return "", changed, upstreamErr(fmt.Errorf("fetch %s: %w", repo, fetchErr))
 		}
 		sha, err = m.resolveRef(ctx, repoPath, ref)
 	}
 
 	if err != nil {
-		return "", changed, fmt.Errorf("resolve %s in %s: %w", ref, repo, err)
+		code := toolerr.RefNotFound
+		if errors.Is(err, git.ErrTimeout) {
+			code = toolerr.Timeout
+		}
+		return "", changed, toolerr.New(code, fmt.Errorf("resolve %s in %s: %w", ref, repo, err))
 	}
 
 	return sha, changed, nil
+}
+
+// upstreamErr marks a clone or fetch error as a timeout or an upstream error,
+// unless it already has a code.
+func upstreamErr(err error) error {
+	switch {
+	case toolerr.CodeOf(err) != toolerr.Internal:
+		return err
+	case errors.Is(err, git.ErrTimeout):
+		return toolerr.New(toolerr.Timeout, err)
+	default:
+		return toolerr.New(toolerr.UpstreamError, err)
+	}
 }
 
 func (m *Manager) updateSize(st *repoState, repoPath string) {
@@ -284,7 +302,7 @@ func (m *Manager) resolveRef(ctx context.Context, repoPath, ref string) (string,
 func (m *Manager) cloneRepo(ctx context.Context, repo, repoPath string) error {
 	url, token, err := m.resolve(repo)
 	if err != nil {
-		return err
+		return toolerr.New(toolerr.InvalidInput, err)
 	}
 
 	// Clone into a temp dir first, so a failed or killed clone never leaves a
@@ -312,7 +330,7 @@ func (m *Manager) cloneRepo(ctx context.Context, repo, repoPath string) error {
 func (m *Manager) fetchRepo(ctx context.Context, repo, repoPath string) error {
 	_, token, err := m.resolve(repo)
 	if err != nil {
-		return err
+		return toolerr.New(toolerr.InvalidInput, err)
 	}
 
 	_, err = m.executor.RunWithEnv(ctx, repoPath, authEnv(token), "fetch", "--prune", "--end-of-options", "origin", "+refs/heads/*:refs/heads/*", "+refs/tags/*:refs/tags/*")

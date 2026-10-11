@@ -57,6 +57,7 @@ func TestExecutorTimeout(t *testing.T) {
 	_, err := exec.Run(context.Background(), t.TempDir(), "clone", "https://192.0.2.1/repo.git", "out")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "timed out")
+	assert.ErrorIs(t, err, git.ErrTimeout)
 }
 
 func TestExecutorSanitizesEnv(t *testing.T) {

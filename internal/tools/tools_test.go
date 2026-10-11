@@ -13,6 +13,7 @@ import (
 
 	"github.com/rophy/git-mcp/internal/cache"
 	"github.com/rophy/git-mcp/internal/git"
+	"github.com/rophy/git-mcp/internal/toolerr"
 	"github.com/rophy/git-mcp/internal/tools"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -532,4 +533,21 @@ func TestGitLog_Skip(t *testing.T) {
 
 	_, err = handler.Execute(context.Background(), tools.GitLogInput{Repo: repo, Ref: "merged", Skip: -1})
 	assert.Error(t, err)
+}
+
+func TestTools_InputErrorsAreInvalidInput(t *testing.T) {
+	mgr, repo, _ := setupTestRepo(t)
+	executor := git.NewExecutor(30 * time.Second)
+	ctx := context.Background()
+	zero := 0
+
+	_, err1 := tools.NewReadFile(mgr, executor, 1024).Execute(ctx, tools.ReadFileInput{Repo: repo, Ref: "main"})
+	_, err2 := tools.NewReadFile(mgr, executor, 10).Execute(ctx, tools.ReadFileInput{Repo: repo, Ref: "main", Path: "src/main.go"})
+	_, err3 := tools.NewGitLog(mgr, executor, 1024).Execute(ctx, tools.GitLogInput{Repo: repo, Ref: "main", Skip: -1})
+	_, err4 := tools.NewGitBlame(mgr, executor, 1024).Execute(ctx, tools.GitBlameInput{Repo: repo, Ref: "main"})
+	_, err5 := tools.NewGitBlame(mgr, executor, 1024).Execute(ctx, tools.GitBlameInput{Repo: repo, Ref: "main", Path: "README.md", StartLine: &zero})
+	for _, err := range []error{err1, err2, err3, err4, err5} {
+		require.Error(t, err)
+		assert.Equal(t, toolerr.InvalidInput, toolerr.CodeOf(err), "%v", err)
+	}
 }

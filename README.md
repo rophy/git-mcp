@@ -19,7 +19,7 @@ git-mcp keeps bare mirrors of upstream repos on local disk and answers tool call
 
 ### Result format
 
-Every tool returns a JSON object. On success, the MCP result has the object in `structuredContent`, and the SDK also puts the same JSON, as a string, in one `content` text block (for clients that do not read `structuredContent`). So the response carries the data twice; read one of them. On error, `isError` is `true` and `content` has one text block with the message; there is no `structuredContent`.
+Every tool returns a JSON object. On success, the MCP result has the object in `structuredContent`, and the SDK also puts the same JSON, as a string, in one `content` text block (for clients that do not read `structuredContent`). So the response carries the data twice; read one of them. On error, see [Errors](#errors).
 
 | Tool | `structuredContent` | Where code text appears |
 |---|---|---|
@@ -32,7 +32,28 @@ Every tool returns a JSON object. On success, the MCP result has the object in `
 | `git_diff` | `{base_sha, head_sha, diff, truncated}` | `diff`: unified diff |
 | `git_blame` | `{sha, lines: [{line, commit, text}], commits: {<sha>: {author, date, summary}}, truncated}` | `text`: one source line |
 
-`sha` is the commit that `ref` resolved to. `truncated: true` means an output limit cut the result; `read_file` returns an error instead when the file is larger than `max_file_size`.
+`sha` is the commit that `ref` resolved to. In `git_blame`, `commits` is left out when there are no lines. `truncated: true` means an output limit cut the result; `read_file` returns an error instead when the file is larger than `max_file_size`.
+
+### Errors
+
+A tool error is an MCP result with `isError: true`. It has a stable code in `_meta.error_code`, and the same code as a prefix of the one `content` text block:
+
+```json
+{"isError": true, "_meta": {"error_code": "ref_not_found"}, "content": [{"type": "text", "text": "ref_not_found: resolve v9 in github.com/org/repo: ..."}]}
+```
+
+The SDK also adds a `structuredContent` with an empty output object. Ignore it when `isError` is `true`.
+
+| `error_code` | Meaning | Retry? |
+|---|---|---|
+| `invalid_input` | The input failed validation (ref, path, repo name, line range, file too large), or no upstream is configured for the repo's host. | No |
+| `access_denied` | The service may not read this repo. | No; fix the config |
+| `ref_not_found` | Clone or fetch worked, but the ref does not exist upstream. | No |
+| `timeout` | A git command hit `git_timeout`. | Yes |
+| `upstream_error` | Clone or fetch failed: network, credentials, or the repo does not exist upstream. git-mcp does not parse host-specific messages, so a missing repo also gives this code. | Yes, with a limit |
+| `internal` | Any other error. | — |
+
+The text after the prefix is for people and LLMs; it can change. An error without `_meta.error_code` comes from the MCP SDK's own schema check (for example an unknown or missing field); treat it as `invalid_input`.
 
 A branch that already exists in the cache is not fetched again. Use `resolve_ref` with `refresh: true` to get the latest commit. Tags and SHAs are served from the cache.
 

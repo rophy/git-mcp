@@ -7,6 +7,7 @@ import (
 
 	"github.com/rophy/git-mcp/internal/cache"
 	"github.com/rophy/git-mcp/internal/git"
+	"github.com/rophy/git-mcp/internal/toolerr"
 	"github.com/rophy/git-mcp/internal/validate"
 )
 
@@ -65,7 +66,7 @@ func (h *GitLog) Execute(ctx context.Context, input GitLogInput) (*GitLogOutput,
 		count = 100
 	}
 	if input.Skip < 0 {
-		return nil, fmt.Errorf("skip must not be negative")
+		return nil, toolerr.Errorf(toolerr.InvalidInput, "skip must not be negative")
 	}
 
 	sha, release, err := h.cache.Ensure(ctx, input.Repo, input.Ref, false)

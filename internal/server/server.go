@@ -17,6 +17,7 @@ import (
 	"github.com/rophy/git-mcp/internal/cache"
 	"github.com/rophy/git-mcp/internal/config"
 	"github.com/rophy/git-mcp/internal/git"
+	"github.com/rophy/git-mcp/internal/toolerr"
 	"github.com/rophy/git-mcp/internal/tools"
 )
 
@@ -28,7 +29,7 @@ func addTool[In, Out any](srv *mcp.Server, authenticator *auth.Authenticator, au
 			entry.Service = audit.ServiceFromContext(ctx)
 			entry.RequestID = audit.RequestIDFromContext(ctx)
 
-			result, err := checkAccess(authenticator, entry.Service, entry.Repo)
+			err := checkAccess(authenticator, entry.Service, entry.Repo)
 			var out Out
 			if err == nil {
 				var res *Out
@@ -39,24 +40,47 @@ func addTool[In, Out any](srv *mcp.Server, authenticator *auth.Authenticator, au
 			}
 
 			entry.Duration = time.Since(start)
+			var result *mcp.CallToolResult
 			if err != nil {
-				entry.Error = err.Error()
+				code := errorCode(err)
+				entry.Error, entry.ErrorCode = err.Error(), string(code)
+				result = errorResult(code, err)
 			}
 			auditLog.Log(entry)
-			return result, out, err
+			return result, out, nil
 		})
+}
+
+// errorCode returns the stable code for a tool error.
+func errorCode(err error) toolerr.Code {
+	code := toolerr.CodeOf(err)
+	if code == toolerr.Internal && errors.Is(err, git.ErrTimeout) {
+		return toolerr.Timeout
+	}
+	return code
+}
+
+// errorResult is a tool error with its code in _meta.error_code and as a text
+// prefix. The SDK only keeps the text of a returned Go error, so the result is
+// built here.
+func errorResult(code toolerr.Code, err error) *mcp.CallToolResult {
+	return &mcp.CallToolResult{
+		IsError: true,
+		Content: []mcp.Content{&mcp.TextContent{Text: string(code) + ": " + err.Error()}},
+		Meta:    mcp.Meta{"error_code": string(code)},
+	}
 }
 
 // checkAccess denies the call unless auth is off or the service may read repo.
 // It fails closed: with auth on, a call without a service is denied.
-func checkAccess(authenticator *auth.Authenticator, service, repo string) (*mcp.CallToolResult, error) {
+func checkAccess(authenticator *auth.Authenticator, service, repo string) error {
 	if authenticator == nil {
-		return nil, nil
+		return nil
 	}
 	if service == "" || !authenticator.CheckRepoAccess(service, repo) {
-		return nil, fmt.Errorf("access denied to repo %s", repo)
+		return toolerr.Errorf(toolerr.AccessDenied, "access denied to repo %s", repo)
 	}
-	return nil, nil
+	return nil
 }
 
 // auditEntry reads the logged fields from the tool input's JSON form.

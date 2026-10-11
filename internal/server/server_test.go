@@ -247,6 +247,8 @@ func TestAccess_FailsClosedWithoutService(t *testing.T) {
 	res, err := session.CallTool(t.Context(), &mcp.CallToolParams{Name: "resolve_ref", Arguments: map[string]any{"repo": repo, "ref": "main"}})
 	require.NoError(t, err)
 	assert.True(t, res.IsError, "call without an authenticated service must be denied")
+	code, _ := toolError(t, res)
+	assert.Equal(t, "access_denied", code)
 
 	records := auditLines(t, logs)
 	require.Len(t, records, 1)
@@ -273,4 +275,68 @@ func TestServeHTTP_ShutdownWithIdleNewConnection(t *testing.T) {
 	err = <-served
 	assert.NoError(t, err)
 	assert.Less(t, time.Since(start), time.Second, "shutdown must not wait for connections that sent no request")
+}
+
+// toolError returns the error code from _meta and the text of an error result.
+func toolError(t *testing.T, res *mcp.CallToolResult) (string, string) {
+	t.Helper()
+	require.True(t, res.IsError, "expected an error result")
+	require.Len(t, res.Content, 1)
+	text := res.Content[0].(*mcp.TextContent).Text
+	code, _ := res.Meta["error_code"].(string)
+	return code, text
+}
+
+func TestErrors_HaveStableCodes(t *testing.T) {
+	srv, repo, _, logs := newTestServer(t, nil)
+	session := connectInMemory(t, srv)
+
+	tests := []struct {
+		tool     string
+		args     map[string]any
+		wantCode string
+	}{
+		{"read_file", map[string]any{"repo": repo, "ref": "main", "path": "../x"}, "invalid_input"},
+		{"search_code", map[string]any{"repo": repo, "ref": "main", "pattern": "-x"}, "invalid_input"},
+		{"resolve_ref", map[string]any{"repo": repo, "ref": "no-such-branch"}, "ref_not_found"},
+	}
+	for _, tt := range tests {
+		res, err := session.CallTool(t.Context(), &mcp.CallToolParams{Name: tt.tool, Arguments: tt.args})
+		require.NoError(t, err, "a tool error must be a result, not a protocol error")
+		code, text := toolError(t, res)
+		assert.Equal(t, tt.wantCode, code, text)
+		assert.True(t, strings.HasPrefix(text, tt.wantCode+": "), text)
+	}
+
+	records := auditLines(t, logs)
+	require.Len(t, records, len(tests))
+	for i, tt := range tests {
+		assert.Equal(t, tt.wantCode, records[i]["error_code"])
+	}
+}
+
+func TestErrors_EveryToolReturnsToolError(t *testing.T) {
+	srv, repo, _, _ := newTestServer(t, nil)
+	session := connectInMemory(t, srv)
+
+	// An invalid ref fails every tool after the SDK's schema check.
+	argsByTool := map[string]map[string]any{
+		"resolve_ref": {"repo": repo, "ref": "--x"},
+		"search_code": {"repo": repo, "ref": "--x", "pattern": "a"},
+		"read_file":   {"repo": repo, "ref": "--x", "path": "a.txt"},
+		"list_files":  {"repo": repo, "ref": "--x"},
+		"git_log":     {"repo": repo, "ref": "--x"},
+		"git_show":    {"repo": repo, "ref": "--x", "commit": "--x"},
+		"git_diff":    {"repo": repo, "base": "--x", "head": "--x"},
+		"git_blame":   {"repo": repo, "ref": "--x", "path": "a.txt"},
+	}
+	res, err := session.ListTools(t.Context(), nil)
+	require.NoError(t, err)
+	require.Len(t, res.Tools, len(argsByTool), "add new tools to argsByTool")
+	for _, tool := range res.Tools {
+		result, err := session.CallTool(t.Context(), &mcp.CallToolParams{Name: tool.Name, Arguments: argsByTool[tool.Name]})
+		require.NoError(t, err, "%s: a tool error must be a result, not a protocol error", tool.Name)
+		code, text := toolError(t, result)
+		assert.Equal(t, "invalid_input", code, "%s: %s", tool.Name, text)
+	}
 }
