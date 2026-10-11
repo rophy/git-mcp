@@ -1,0 +1,25 @@
+server:
+  listen: "0.0.0.0:8080"
+  cache_dir: "/data/repos"
+  git_timeout: "30s"
+
+upstream:
+  git.test:
+    base_url: "http://gitserver"
+
+auth:
+  audience: "git-mcp"
+  issuers:
+    - name: "e2e"
+      iss: "https://issuer.e2e.test"
+      jwks_uri: "http://tester:8081/jwks.json"
+
+services:
+  reader:
+    issuer: "e2e"
+    subject: "reader"
+    repos: ["git.test/org/*"]
+  narrow:
+    issuer: "e2e"
+    subject: "narrow"
+    repos: ["git.test/org/repo-a"]

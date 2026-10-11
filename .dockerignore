@@ -1,5 +1,6 @@
 .git
 testdata
+e2e
 docs
 *.md
 git-mcp

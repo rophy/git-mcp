@@ -1,0 +1,61 @@
+# E2E environment. Run with `make e2e-test`.
+name: git-mcp-e2e
+
+x-git-mcp-image: &git-mcp-image
+  image: git-mcp:e2e
+  build:
+    context: ..
+
+services:
+  # Creates bare test repos in the shared volume, then exits.
+  fixtures:
+    <<: *git-mcp-image
+    user: "0"
+    entrypoint: ["/bin/sh", "/e2e/fixtures.sh"]
+    volumes:
+      - ./fixtures.sh:/e2e/fixtures.sh:ro
+      - upstream:/srv/git
+
+  # Serves the test repos over git's dumb HTTP protocol.
+  gitserver:
+    image: nginx:1.27-alpine
+    volumes:
+      - upstream:/usr/share/nginx/html:ro
+    depends_on:
+      fixtures:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/org/repo-a/info/refs"]
+      interval: 2s
+      retries: 10
+
+  git-mcp:
+    <<: *git-mcp-image
+    volumes:
+      - ./config.yaml:/etc/git-mcp/config.yaml:ro
+    depends_on:
+      gitserver:
+        condition: service_healthy
+
+  # Runs the e2e tests. It also serves the JWKS for the tokens it signs.
+  tester:
+    image: golang:1.25-alpine
+    profiles: [test]
+    working_dir: /src
+    command: ["go", "test", "-tags=e2e", "-count=1", "-v", "./e2e/"]
+    environment:
+      CGO_ENABLED: "0"
+      GIT_MCP_URL: http://git-mcp:8080
+      JWKS_LISTEN: ":8081"
+    volumes:
+      - ..:/src:ro
+      - gocache:/root/.cache/go-build
+      - gomod:/go/pkg/mod
+    depends_on:
+      git-mcp:
+        condition: service_healthy
+
+volumes:
+  upstream:
+  gocache:
+  gomod:
