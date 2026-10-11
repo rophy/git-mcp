@@ -254,16 +254,19 @@ services:
 4. Validate signature against that issuer's JWKS.
 5. Validate `aud` contains `git-mcp` (from `auth.audience`). Validate `exp`/`nbf`.
 6. Match `(iss, sub)` pair → service name in config.
-7. Check if requested repo matches the service's allowed repos.
-8. Deny → 403. Allow → proceed, log the access.
+7. Check if requested repo matches the service's allowed repos. A repo path that is not clean (`.`, `..`, `//`) never matches.
+8. Auth failure (steps 1–6) → HTTP 401 with `WWW-Authenticate: Bearer realm="git-mcp"` (plus `error="invalid_token"` for a bad token). Repo denied (step 7) → MCP tool error `access denied to repo <repo>` (HTTP 200, `isError: true`). Allow → proceed. Every tool call is logged (see Audit Log).
+9. The check fails closed: with auth on, a call without an authenticated service is denied.
 
 ### Audit Log
 
 Structured JSON, one line per tool call. Callers pass a correlation ID via the `X-Request-Id` header (or W3C `traceparent`), logged alongside both the requested ref and the resolved SHA:
 
 ```json
-{"ts":"2026-10-11T14:30:00Z","service":"diagnostics-agent","request_id":"req-abc123","tool":"read_file","repo":"github.com/org/checkout-service","ref":"v2.7.0","resolved_sha":"a1b2c3d4","path":"src/handler.ts","duration_ms":12}
+{"time":"2026-10-11T14:30:00Z","level":"INFO","msg":"tool_call","service":"diagnostics-agent","request_id":"req-abc123","tool":"read_file","repo":"github.com/org/checkout-service","ref":"v2.7.0","resolved_sha":"a1b2c3d4...","path":"src/handler.ts","duration_ms":12}
 ```
+
+Denied and failed calls are logged too, with an `error` field. For `git_diff`, `ref` is `<base>...<head>`.
 
 ## Deployment
 
@@ -290,24 +293,15 @@ server:
   max_file_size: "1MB"
   max_matches: 50
   max_diff_size: "500KB"
-  max_output_size: "1MB"         # search_code, list_files, git_log
+  max_output_size: "1MB"         # search_code, list_files, git_log, git_blame
   git_timeout: "30s"
 ```
 
 ### Container
 
-```dockerfile
-FROM golang:1.23 AS build
-# build binary
+See `Dockerfile`: a static Go build on `alpine` with `git`, running as a non-root user (uid 10001), with a `HEALTHCHECK` on `/health`. The default command is `serve --config /etc/git-mcp/config.yaml`.
 
-FROM alpine:3.20
-RUN apk add --no-cache git
-COPY --from=build /git-mcp /usr/local/bin/
-VOLUME /data/repos
-ENTRYPOINT ["git-mcp", "serve"]
-```
-
-Mount a persistent volume at `/data/repos` for the cache. Config via file or environment variables.
+Mount a persistent volume at `/data/repos` for the cache, writable only by git-mcp (see Accepted Risks). Config via file; `${VAR}` references in it are expanded from the environment.
 
 ### Kubernetes
 
@@ -315,11 +309,16 @@ StatefulSet with persistent volume, or a Deployment with a PVC. Single replica i
 
 ### Health Check
 
-`GET /health` — returns cache stats (repo count, disk usage, uptime).
+`GET /health` — returns `{"status":"ok"}` without auth. Cache stats are not exposed yet.
 
 ## Future Additions (Not in MVP)
 
-- `find_symbols` — tree-sitter or ctags based symbol search
+- `find_symbols` — find definitions (functions, types, methods) instead of text, e.g. `{name, kind, path, line, scope}`, or list a file's symbols as an outline. Analysis (2026-10-11):
+  - **universal-ctags** (preferred): one extra binary in the image, 100+ languages, no CGO.
+  - **tree-sitter**: more exact, but Go bindings need CGO and a grammar per language.
+  - Both need the files at a SHA exported from the bare repo (e.g. `git archive` to a temp dir), a per-SHA result cache counted in `max_cache_size`, and the usual timeout and output limits, since the parser runs on untrusted code.
+  - Deferred until real use shows that `search_code` with a regex is not enough.
+- `/health` cache stats (repo count, disk usage, uptime)
 - Repo management API (list cached repos, force refresh, evict)
 - Webhook-triggered cache refresh (on push events)
 - Multi-replica with shared storage
